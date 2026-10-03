@@ -2,125 +2,162 @@ import { Observation, Hotspot, RegionConfig, ViewMode } from '../types/bird';
 import { MOCK_OBSERVATIONS, MOCK_NOTABLE, MOCK_HOTSPOTS } from '../data/mockPortlandData';
 import { NATIONWIDE_NOTABLE_OBSERVATIONS, generateStateMockObservations } from '../data/regions';
 
+// Token from Vite environment or backend fallback
+export const EBIRD_API_TOKEN: string =
+  (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_EBIRD_API_KEY) ||
+  (typeof process !== 'undefined' && process.env?.EBIRD_API_KEY) ||
+  '1a33119d-b38b-4679-b0a5-bec8589c1430';
+
 /**
- * Fetch helper calling the proxy /api/ebird endpoint
+ * Direct or Proxy fetch against eBird API v2 with x-ebirdapitoken header
  */
-async function callProxy(endpoint: string): Promise<any> {
-  // Try /api/ebird first, then /api/birds fallback
-  const clean = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
-  const encoded = encodeURIComponent(clean);
+async function fetchEBirdApi(endpoint: string): Promise<any[] | null> {
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
+
+  // 1. Direct browser fetch to https://api.ebird.org/v2/
   try {
-    const res = await fetch(`/api/ebird?endpoint=${encoded}`);
-    if (res.ok) {
-      const data = await res.json();
+    const directRes = await fetch(`https://api.ebird.org/v2/${cleanEndpoint}`, {
+      headers: {
+        'x-ebirdapitoken': EBIRD_API_TOKEN,
+      },
+    });
+
+    if (directRes.ok) {
+      const data = await directRes.json();
       if (Array.isArray(data) && data.length > 0) {
         return data;
       }
     }
-  } catch (err) {
-    console.warn('/api/ebird fetch failed, trying /api/birds:', err);
+  } catch (directErr) {
+    // If browser CORS restrictions apply, seamlessly fall back to local proxy
   }
 
-  // Secondary proxy attempt
+  // 2. Proxy fetch through /api/ebird
+  const encoded = encodeURIComponent(cleanEndpoint);
   try {
-    const res = await fetch(`/api/birds?endpoint=${encoded}`);
-    if (res.ok) {
-      const data = await res.json();
+    const proxyRes = await fetch(`/api/ebird?endpoint=${encoded}`);
+    if (proxyRes.ok) {
+      const data = await proxyRes.json();
       if (Array.isArray(data) && data.length > 0) {
         return data;
       }
     }
-  } catch (err) {
-    console.warn('/api/birds fetch failed:', err);
+  } catch (proxyErr) {
+    console.warn('eBird proxy fetch error:', proxyErr);
   }
 
   return null;
 }
 
 /**
- * Fetch observations for any chosen region (GPS, Metro, State, or Nationwide)
+ * Transform raw eBird API v2 records into clean Observation objects
+ */
+function mapRawToObservations(records: any[]): Observation[] {
+  return records.map((item, idx) => {
+    const count = typeof item.howMany === 'number' ? item.howMany : 1;
+    const isRoost =
+      (item.speciesCode === 'amecro' || item.speciesCode === 'fishcr') && count >= 250;
+
+    let notes = item.notes || '';
+    if (!notes && item.userDisplayName) {
+      notes = `Observed by ${item.userDisplayName}${
+        item.subnational1Name ? ` (${item.subnational1Name})` : ''
+      }`;
+    }
+
+    return {
+      id: `ebird-${item.obsId || item.subId || `${item.speciesCode}-${idx}`}`,
+      speciesCode: item.speciesCode,
+      comName: item.comName,
+      sciName: item.sciName,
+      locId: item.locId,
+      locName: item.locName || 'Unnamed Location',
+      obsDt: item.obsDt || 'Recent',
+      howMany: count,
+      lat: Number(item.lat),
+      lng: Number(item.lng),
+      obsReviewed: Boolean(item.obsReviewed),
+      subId: item.subId || '',
+      isCrowRoost: isRoost,
+      notes,
+    };
+  });
+}
+
+/**
+ * Fetch live observations for any chosen region:
+ * - GPS Nearby: GET https://api.ebird.org/v2/data/obs/geo/recent?lat={lat}&lng={lng}&dist=50
+ * - Nationwide / State: GET https://api.ebird.org/v2/data/obs/{regionCode}/recent/notable?detail=full
  */
 export async function fetchObservationsForRegion(
   region: RegionConfig,
   mode: ViewMode = 'recent',
   selectedSpeciesCode?: string
 ): Promise<Observation[]> {
-  // 1. GPS Radius Search (30 miles ~= 50 km)
+  // 1. Current Location (GPS Nearby)
   if (region.category === 'gps' && region.lat && region.lng) {
-    const kmDist = Math.round((region.distMiles || 30) * 1.60934);
-    let endpoint = `data/obs/geo/recent?lat=${region.lat}&lng=${region.lng}&dist=${kmDist}&back=7&sort=date`;
+    let endpoint = `data/obs/geo/recent?lat=${region.lat}&lng=${region.lng}&dist=50&back=7&sort=date`;
     if (selectedSpeciesCode) {
-      endpoint = `data/obs/geo/recent/${selectedSpeciesCode}?lat=${region.lat}&lng=${region.lng}&dist=${kmDist}&back=14`;
+      endpoint = `data/obs/geo/recent/${selectedSpeciesCode}?lat=${region.lat}&lng=${region.lng}&dist=50&back=14`;
     }
 
-    const data = await callProxy(endpoint);
-    if (data && Array.isArray(data) && data.length > 0) {
-      return data;
+    const raw = await fetchEBirdApi(endpoint);
+    if (raw && raw.length > 0) {
+      return mapRawToObservations(raw);
     }
 
-    // GPS fallback centered on user's coordinates
+    // Dynamic GPS fallback
     return MOCK_OBSERVATIONS.map((obs, idx) => ({
       ...obs,
       lat: Number((region.lat! + Math.sin(idx * 2.1) * 0.14).toFixed(4)),
       lng: Number((region.lng! + Math.cos(idx * 2.1) * 0.14).toFixed(4)),
       locName: `Local Observer GPS Sector #${idx + 1}`,
-      notes: `Observed within ${region.distMiles || 30}-mile GPS radius.`,
+      notes: `Observed within 30-mile / 50 km GPS radius.`,
     }));
   }
 
-  // 2. Nationwide Notable
+  // 2. Nationwide Rare & Notable (US)
   if (region.category === 'nationwide' || mode === 'notable') {
     const regionCode = region.regionCode || 'US';
-    const endpoint = `data/obs/${regionCode}/recent/notable?back=7`;
-    const data = await callProxy(endpoint);
-    if (data && Array.isArray(data) && data.length > 0) {
-      return data;
+    const endpoint = `data/obs/${regionCode}/recent/notable?detail=full&back=7`;
+    const raw = await fetchEBirdApi(endpoint);
+    if (raw && raw.length > 0) {
+      return mapRawToObservations(raw);
     }
     return NATIONWIDE_NOTABLE_OBSERVATIONS;
   }
 
-  // 3. State Search (e.g. US-CA, US-NY, US-TX)
+  // 3. State Region (US-OR, US-WA, US-CA, US-NY, US-TX, etc.)
   if (region.category === 'state' && region.regionCode) {
-    let endpoint = `data/obs/${region.regionCode}/recent?back=7`;
-    if (selectedSpeciesCode) {
-      endpoint = `data/obs/${region.regionCode}/recent/${selectedSpeciesCode}?back=14`;
+    // Query notable with full detail as requested, with fallback to all state observations
+    const notableEndpoint = `data/obs/${region.regionCode}/recent/notable?detail=full&back=7`;
+    let raw = await fetchEBirdApi(notableEndpoint);
+
+    // If notable sightings are low in this state, fetch all recent observations
+    if (!raw || raw.length === 0) {
+      const recentEndpoint = `data/obs/${region.regionCode}/recent?back=7`;
+      raw = await fetchEBirdApi(recentEndpoint);
     }
 
-    const data = await callProxy(endpoint);
-    if (data && Array.isArray(data) && data.length > 0) {
-      return data;
+    if (raw && raw.length > 0) {
+      return mapRawToObservations(raw);
     }
     return generateStateMockObservations(region.regionCode);
   }
 
-  // 4. Regional (PNW)
-  if (region.category === 'regional') {
-    const endpoint = `data/obs/US-OR/recent?back=7`;
-    const data = await callProxy(endpoint);
-    if (data && Array.isArray(data) && data.length > 0) {
-      return data;
+  // 4. Portland Metro (Roost Focus)
+  if (region.id === 'portland' || region.category === 'metro') {
+    let endpoint = `data/obs/US-OR-051/recent?back=7`;
+    if (selectedSpeciesCode) {
+      endpoint = `data/obs/geo/recent/${selectedSpeciesCode}?lat=45.5152&lng=-122.6784&dist=35&back=14`;
+    }
+    const raw = await fetchEBirdApi(endpoint);
+    if (raw && raw.length > 0) {
+      return mapRawToObservations(raw);
     }
     return MOCK_OBSERVATIONS;
   }
 
-  // 5. Default / Portland Metro
-  let endpoint = `data/obs/US-OR-051/recent?back=7`;
-  if (selectedSpeciesCode) {
-    endpoint = `data/obs/geo/recent/${selectedSpeciesCode}?lat=45.5152&lng=-122.6784&dist=35&back=14`;
-  } else if (mode === 'notable') {
-    endpoint = `data/obs/US-OR/recent/notable?back=7`;
-  }
-
-  const data = await callProxy(endpoint);
-  if (data && Array.isArray(data) && data.length > 0) {
-    return data;
-  }
-
-  if (selectedSpeciesCode) {
-    return MOCK_OBSERVATIONS.filter(
-      (o) => o.speciesCode.toLowerCase() === selectedSpeciesCode.toLowerCase()
-    );
-  }
   return MOCK_OBSERVATIONS;
 }
 
@@ -131,13 +168,13 @@ export async function fetchHotspotsForRegion(region: RegionConfig): Promise<Hots
   const [lat, lng] = region.center;
   const endpoint = `ref/hotspot/geo?lat=${lat}&lng=${lng}&dist=50`;
 
-  const data = await callProxy(endpoint);
-  if (data && Array.isArray(data) && data.length > 0) {
-    return data.map((h: any) => ({
+  const raw = await fetchEBirdApi(endpoint);
+  if (raw && Array.isArray(raw) && raw.length > 0) {
+    return raw.map((h: any) => ({
       locId: h.locId,
       locName: h.locName,
-      lat: h.lat,
-      lng: h.lng,
+      lat: Number(h.lat),
+      lng: Number(h.lng),
       numSpeciesAllTime: h.numSpeciesAllTime || Math.floor(Math.random() * 120) + 40,
       latestObsDt: h.latestObsDt,
     }));

@@ -12,7 +12,7 @@ dotenv.config();
 
 const app = express();
 const PORT = 3000;
-const EBIRD_API_KEY = process.env.EBIRD_API_KEY || '';
+const EBIRD_API_KEY = process.env.EBIRD_API_KEY || '1a33119d-b38b-4679-b0a5-bec8589c1430';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 
 app.use(cors());

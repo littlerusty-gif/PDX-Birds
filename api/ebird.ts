@@ -1,14 +1,14 @@
 import type { Request, Response } from 'express';
 
 export default async function handler(req: Request, res: Response) {
-  const EBIRD_API_KEY = process.env.EBIRD_API_KEY || '';
+  const EBIRD_API_KEY = process.env.EBIRD_API_KEY || '1a33119d-b38b-4679-b0a5-bec8589c1430';
   
   let endpoint = (req.query?.endpoint as string) || '';
   if (!endpoint) {
     const species = (req.query?.species as string) || '';
     const lat = req.query?.lat || '45.5152';
     const lng = req.query?.lng || '-122.6784';
-    const dist = req.query?.dist || '25';
+    const dist = req.query?.dist || '50';
     const back = req.query?.back || '7';
 
     if (species) {
@@ -19,14 +19,6 @@ export default async function handler(req: Request, res: Response) {
   }
 
   const cleanEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
-
-  if (!EBIRD_API_KEY || EBIRD_API_KEY === 'x-ebirdapitoken' || EBIRD_API_KEY === 'DEFAULT_KEY') {
-    return res.status(200).json({
-      message: 'eBird proxy fallback active',
-      endpoint: cleanEndpoint,
-      status: 'fallback'
-    });
-  }
 
   try {
     const ebirdRes = await fetch(`https://api.ebird.org/v2/${cleanEndpoint}`, {

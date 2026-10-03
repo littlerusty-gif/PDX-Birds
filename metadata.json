@@ -1,6 +1,6 @@
 {
-  "name": "Birdbook",
-  "description": "Birdbook - Portland urban birding, flight paths, and crow mega-roost tracker across Multnomah County.",
+  "name": "The Bird Book",
+  "description": "The Bird Book - Nationwide US bird tracking application, local roosts, and live eBird API telemetry.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, Tooltip, Circle, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, Tooltip, Circle, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { Observation, Hotspot, FlightCorridor, ViewMode, RegionConfig } from '../types/bird';
 import { SPECIES_FORECASTS, isSpeciesOptimalNow } from '../data/viewingForecast';
-import { ExternalLink, Navigation, CheckCircle2, Compass, Wind, Layers, Clock, Sparkles, MapPin } from 'lucide-react';
+import { ExternalLink, Navigation, CheckCircle2, Compass, Wind, Layers, Clock, Sparkles, MapPin, ZoomIn } from 'lucide-react';
 
 interface MapProps {
   observations: Observation[];
@@ -20,19 +20,31 @@ interface MapProps {
   isLocating?: boolean;
 }
 
-// Controller component to smoothly fly to selected item, corridor, region, or GPS coordinate
+// Controller component to smoothly adjust bounds and fly to items
 function MapController({
   item,
   selectedCorridor,
   region,
   userLocation,
+  onZoomChange,
 }: {
   item: Observation | Hotspot | null;
   selectedCorridor?: FlightCorridor | null;
   region?: RegionConfig;
   userLocation?: [number, number] | null;
+  onZoomChange: (zoom: number) => void;
 }) {
   const map = useMap();
+
+  useMapEvents({
+    zoomend: () => {
+      onZoomChange(map.getZoom());
+    },
+  });
+
+  useEffect(() => {
+    onZoomChange(map.getZoom());
+  }, [map, onZoomChange]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -65,13 +77,15 @@ function MapController({
     }
   }, [selectedCorridor, map]);
 
-  // Fly to region center or GPS location when region changes
+  // Adjust Leaflet map bounds to fit region bounding box or center
   useEffect(() => {
     if (region) {
       if (region.category === 'gps' && userLocation) {
-        map.flyTo(userLocation, 12, { duration: 1.4 });
+        map.flyTo(userLocation, 12, { duration: 1.2 });
+      } else if (region.bounds) {
+        map.fitBounds(region.bounds, { padding: [35, 35], maxZoom: region.zoom, duration: 1.2 });
       } else {
-        map.flyTo(region.center, region.zoom, { duration: 1.4 });
+        map.flyTo(region.center, region.zoom, { duration: 1.2 });
       }
     }
   }, [region, userLocation, map]);
@@ -90,7 +104,7 @@ function calculateBearing(lat1: number, lng1: number, lat2: number, lng2: number
   return (brng + 360) % 360;
 }
 
-// Interpolate point along a sequence of coordinates according to progress 0.0 -> 1.0
+// Progress interpolation for traveling bird silhouettes
 function getPositionAtProgress(
   coords: [number, number][],
   progress: number
@@ -134,6 +148,17 @@ function getPositionAtProgress(
   };
 }
 
+interface ObservationCluster {
+  id: string;
+  lat: number;
+  lng: number;
+  count: number;
+  totalBirds: number;
+  hasNotable: boolean;
+  hasMegaRoost: boolean;
+  observations: Observation[];
+}
+
 export const Map: React.FC<MapProps> = ({
   observations,
   hotspots,
@@ -150,10 +175,13 @@ export const Map: React.FC<MapProps> = ({
 }) => {
   const defaultCenter: [number, number] = region ? region.center : [45.5152, -122.6784];
   const defaultZoom = region ? region.zoom : 12;
+
+  const [currentZoom, setCurrentZoom] = useState<number>(defaultZoom);
   const [showFlightPaths, setShowFlightPaths] = useState<boolean>(true);
   const [animationProgress, setAnimationProgress] = useState<number>(0);
 
-  const isPortlandOrPnw = region?.category === 'metro' || region?.id === 'portland';
+  // Active in metro hubs (Portland, Seattle, etc.) or when zoomed in
+  const isMetroView = currentZoom >= 10 || region?.category === 'metro' || region?.id === 'portland';
 
   // Smooth continuous flight animation loop for traveling bird silhouettes
   useEffect(() => {
@@ -164,13 +192,96 @@ export const Map: React.FC<MapProps> = ({
     return () => clearInterval(interval);
   }, [showFlightPaths]);
 
-  // Custom graduated HTML markers with color coding and glowing pulse for roosts
+  // Spatial Clustering for Nationwide / Statewide views (when currentZoom < 10)
+  const observationClusters = useMemo(() => {
+    if (isMetroView || mode === 'hotspots') return [];
+
+    const gridSize = currentZoom <= 5 ? 2.8 : currentZoom <= 7 ? 1.2 : 0.55;
+    const grid = new Map<string, Observation[]>();
+
+    observations.forEach((obs) => {
+      const gridX = Math.floor(obs.lng / gridSize);
+      const gridY = Math.floor(obs.lat / gridSize);
+      const key = `${gridX}:${gridY}`;
+      if (!grid.has(key)) {
+        grid.set(key, []);
+      }
+      grid.get(key)!.push(obs);
+    });
+
+    const clusters: ObservationCluster[] = [];
+    grid.forEach((items, key) => {
+      const totalBirds = items.reduce((acc, o) => acc + (o.howMany || 1), 0);
+      const avgLat = items.reduce((acc, o) => acc + o.lat, 0) / items.length;
+      const avgLng = items.reduce((acc, o) => acc + o.lng, 0) / items.length;
+      const hasMegaRoost = items.some((o) => o.isCrowRoost || (o.howMany || 1) >= 250);
+      const hasNotable = items.some(
+        (o) => o.obsReviewed || (o.notes && o.notes.toLowerCase().includes('notable'))
+      );
+
+      clusters.push({
+        id: `cluster-${key}`,
+        lat: Number(avgLat.toFixed(4)),
+        lng: Number(avgLng.toFixed(4)),
+        count: items.length,
+        totalBirds,
+        hasNotable,
+        hasMegaRoost,
+        observations: items,
+      });
+    });
+
+    return clusters;
+  }, [observations, isMetroView, mode, currentZoom]);
+
+  // Custom Clustered Observation Pin (Colored by Rarity & Flock Size)
+  const createClusterIcon = (cluster: ObservationCluster) => {
+    let bgColor = '#10b981'; // Emerald for standard clusters
+    let pulseHtml = '';
+    let size = cluster.count >= 10 ? 38 : 32;
+
+    if (cluster.hasMegaRoost) {
+      bgColor = '#ef4444'; // Glowing crimson for mega-roosts
+      pulseHtml = `<span class="absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75 animate-ping"></span>`;
+      size = 40;
+    } else if (cluster.hasNotable) {
+      bgColor = '#a855f7'; // Purple for notable & rare species
+      pulseHtml = `<span class="absolute inline-flex h-full w-full rounded-full bg-purple-500 opacity-60 animate-ping"></span>`;
+      size = 36;
+    } else if (cluster.totalBirds >= 50) {
+      bgColor = '#f59e0b'; // Amber for high flock counts
+    }
+
+    const displayCount =
+      cluster.totalBirds > 999
+        ? (cluster.totalBirds / 1000).toFixed(1) + 'k'
+        : cluster.count > 1
+        ? `${cluster.count} obs`
+        : cluster.totalBirds;
+
+    return L.divIcon({
+      className: 'relative flex items-center justify-center',
+      html: `
+        <div class="relative flex items-center justify-center cursor-pointer" style="width: ${size}px; height: ${size}px;">
+          ${pulseHtml}
+          <div style="background-color: ${bgColor}; width: ${size}px; height: ${size}px;" 
+               class="rounded-full border-2 border-white shadow-xl flex items-center justify-center text-slate-950 font-black text-[10px] text-center px-0.5 leading-none">
+            ${displayCount}
+          </div>
+        </div>
+      `,
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size / 2],
+    });
+  };
+
+  // Custom individual observation marker
   const createObservationIcon = (obs: Observation) => {
     const count = obs.howMany || 1;
     const isRoost = obs.isCrowRoost || count >= 250;
 
     let color = '#14b8a6'; // Soft teal (1-20)
-    let size = 20;
+    let size = 22;
 
     if (isRoost) {
       color = '#ef4444'; // Glowing crimson pulse (> 250)
@@ -180,10 +291,9 @@ export const Map: React.FC<MapProps> = ({
       size = 26;
     } else if (count > 20) {
       color = '#f59e0b'; // Bright amber (21-100)
-      size = 22;
+      size = 24;
     }
 
-    // Transit direction arrow icon
     let arrowHtml = '';
     if (obs.direction) {
       let arrowChar = '➔';
@@ -239,7 +349,6 @@ export const Map: React.FC<MapProps> = ({
     });
   };
 
-  // User GPS Location Pin Marker
   const createUserLocationIcon = () => {
     return L.divIcon({
       className: 'relative flex items-center justify-center',
@@ -256,7 +365,6 @@ export const Map: React.FC<MapProps> = ({
     });
   };
 
-  // Directional arrowhead decorator spaced along corridor segments
   const createArrowDecoratorIcon = (bearingDeg: number, color: string) => {
     return L.divIcon({
       className: 'directional-arrow-decorator',
@@ -272,7 +380,6 @@ export const Map: React.FC<MapProps> = ({
     });
   };
 
-  // Animated flying bird silhouette glyph traveling along polyline path
   const createFlyingBirdIcon = (bearingDeg: number, color: string, isLead: boolean = false) => {
     const size = isLead ? 26 : 21;
     return L.divIcon({
@@ -291,8 +398,10 @@ export const Map: React.FC<MapProps> = ({
     });
   };
 
-  // Compute trajectory polylines and intermediate markers for active observations
+  // Trajectories for roost observations
   const observationTrajectories = useMemo(() => {
+    if (!isMetroView) return [];
+
     return observations
       .filter((obs) => obs.trajectoryCoords || obs.direction || obs.flightHeadingDeg)
       .map((obs) => {
@@ -333,7 +442,7 @@ export const Map: React.FC<MapProps> = ({
           isRoost: obs.isCrowRoost || (obs.howMany || 0) >= 250,
         };
       });
-  }, [observations]);
+  }, [observations, isMetroView]);
 
   return (
     <div
@@ -342,7 +451,6 @@ export const Map: React.FC<MapProps> = ({
     >
       {/* Floating Map Controls (Top Right) */}
       <div className="absolute top-4 right-4 z-[400] flex flex-wrap items-center gap-2">
-        {/* "Use My Location" GPS Button */}
         {onLocateMe && (
           <button
             onClick={onLocateMe}
@@ -359,8 +467,7 @@ export const Map: React.FC<MapProps> = ({
           </button>
         )}
 
-        {/* Flight Paths Toggle Control Button (shown when viewing roost areas) */}
-        {isPortlandOrPnw && (
+        {isMetroView && (
           <button
             onClick={() => setShowFlightPaths(!showFlightPaths)}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xl border backdrop-blur-md ${
@@ -398,6 +505,7 @@ export const Map: React.FC<MapProps> = ({
           selectedCorridor={selectedCorridor}
           region={region}
           userLocation={userLocation}
+          onZoomChange={setCurrentZoom}
         />
 
         {/* User GPS Location Marker & 30-mile Radius */}
@@ -418,7 +526,7 @@ export const Map: React.FC<MapProps> = ({
             </Marker>
             <Circle
               center={userLocation}
-              radius={48280} // 30 miles in meters
+              radius={48280}
               pathOptions={{
                 color: '#38bdf8',
                 fillColor: '#0284c7',
@@ -430,8 +538,8 @@ export const Map: React.FC<MapProps> = ({
           </>
         )}
 
-        {/* Major Flight Corridors (Enabled for Portland / PNW Metro Roosts) */}
-        {isPortlandOrPnw &&
+        {/* Major Flight Corridors in Metro Roosts */}
+        {isMetroView &&
           showFlightPaths &&
           corridors.map((corridor) => {
             const isSelected = selectedCorridor?.id === corridor.id;
@@ -520,8 +628,9 @@ export const Map: React.FC<MapProps> = ({
             );
           })}
 
-        {/* Observation-Specific Back-Traced Inbound Trajectories */}
-        {showFlightPaths &&
+        {/* Metro Observation Trajectories */}
+        {isMetroView &&
+          showFlightPaths &&
           observationTrajectories.map((traj) => {
             const color = traj.isRoost ? '#ef4444' : '#38bdf8';
             const birdPos = getPositionAtProgress(traj.coords, (animationProgress * 1.5) % 1);
@@ -557,43 +666,57 @@ export const Map: React.FC<MapProps> = ({
             );
           })}
 
-        {/* Hotspots Mode */}
-        {mode === 'hotspots' &&
-          hotspots?.map((spot) => (
+        {/* ===================== NATIONWIDE / STATE CLUSTERED PINS (Zoom < 10) ===================== */}
+        {!isMetroView &&
+          mode !== 'hotspots' &&
+          observationClusters.map((cluster) => (
             <Marker
-              key={spot.locId}
-              position={[spot.lat, spot.lng]}
-              icon={createHotspotIcon()}
-              eventHandlers={{ click: () => onSelectItem(spot) }}
+              key={cluster.id}
+              position={[cluster.lat, cluster.lng]}
+              icon={createClusterIcon(cluster)}
             >
               <Popup>
                 <div className="p-1 min-w-[210px] text-slate-200">
-                  <div className="flex items-center gap-1.5 text-emerald-400 font-bold text-sm mb-1">
-                    <span>📍</span>
-                    <span>{spot.locName}</span>
+                  <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-1.5 mb-2">
+                    <span className="font-bold text-sm text-slate-100 flex items-center gap-1.5">
+                      <span>Regional Flock Cluster</span>
+                    </span>
+                    <span className="text-[11px] font-mono font-bold bg-slate-800 text-emerald-400 px-1.5 py-0.5 rounded">
+                      {cluster.totalBirds.toLocaleString()} birds
+                    </span>
                   </div>
-                  <div className="text-xs text-slate-400 mb-2">Code: {spot.locId}</div>
-                  <div className="bg-slate-800 rounded p-2 text-xs mb-2">
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">All-Time Species:</span>
-                      <span className="font-bold text-emerald-300">{spot.numSpeciesAllTime}</span>
-                    </div>
+
+                  <div className="space-y-1.5 max-h-36 overflow-y-auto custom-scrollbar pr-1 mb-2">
+                    {cluster.observations.slice(0, 5).map((obs) => (
+                      <div
+                        key={obs.id}
+                        onClick={() => onSelectItem(obs)}
+                        className="text-xs p-1.5 rounded bg-slate-850 hover:bg-slate-800 cursor-pointer flex items-center justify-between"
+                      >
+                        <span className="truncate font-semibold text-slate-200">{obs.comName}</span>
+                        <span className="text-[11px] text-emerald-400 font-bold ml-1.5">
+                          {obs.howMany.toLocaleString()}
+                        </span>
+                      </div>
+                    ))}
+                    {cluster.observations.length > 5 && (
+                      <div className="text-[10px] text-slate-400 italic text-center">
+                        + {cluster.observations.length - 5} more observations in this sector
+                      </div>
+                    )}
                   </div>
-                  <a
-                    href={`https://ebird.org/hotspot/${spot.locId}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1"
-                  >
-                    View eBird Hotspot <ExternalLink size={12} />
-                  </a>
+
+                  <div className="text-[11px] text-slate-400 flex items-center justify-between pt-1 border-t border-slate-800">
+                    <span>Click on a sighting or zoom in to inspect</span>
+                  </div>
                 </div>
               </Popup>
             </Marker>
           ))}
 
-        {/* Observations (Species, Recent, Notable, Routes) */}
-        {mode !== 'hotspots' &&
+        {/* ===================== INDIVIDUAL OBSERVATIONS (Zoom >= 10 or Metro) ===================== */}
+        {(isMetroView || mode === 'hotspots') &&
+          mode !== 'hotspots' &&
           observations.map((obs) => (
             <Marker
               key={obs.id}
@@ -676,6 +799,41 @@ export const Map: React.FC<MapProps> = ({
                       </span>
                     )}
                   </div>
+                </div>
+              </Popup>
+            </Marker>
+          ))}
+
+        {/* Hotspots Mode */}
+        {mode === 'hotspots' &&
+          hotspots?.map((spot) => (
+            <Marker
+              key={spot.locId}
+              position={[spot.lat, spot.lng]}
+              icon={createHotspotIcon()}
+              eventHandlers={{ click: () => onSelectItem(spot) }}
+            >
+              <Popup>
+                <div className="p-1 min-w-[210px] text-slate-200">
+                  <div className="flex items-center gap-1.5 text-emerald-400 font-bold text-sm mb-1">
+                    <span>📍</span>
+                    <span>{spot.locName}</span>
+                  </div>
+                  <div className="text-xs text-slate-400 mb-2">Code: {spot.locId}</div>
+                  <div className="bg-slate-800 rounded p-2 text-xs mb-2">
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">All-Time Species:</span>
+                      <span className="font-bold text-emerald-300">{spot.numSpeciesAllTime}</span>
+                    </div>
+                  </div>
+                  <a
+                    href={`https://ebird.org/hotspot/${spot.locId}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1"
+                  >
+                    View eBird Hotspot <ExternalLink size={12} />
+                  </a>
                 </div>
               </Popup>
             </Marker>

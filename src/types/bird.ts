@@ -80,5 +80,6 @@ export interface RegionConfig {
   lat?: number;
   lng?: number;
   distMiles?: number;
+  bounds?: [[number, number], [number, number]];
 }
 

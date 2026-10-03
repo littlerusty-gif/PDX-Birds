@@ -129,23 +129,23 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="bg-slate-950/95 backdrop-blur-md border-b border-slate-800/80 text-slate-100 px-3 md:px-4 py-2 md:py-2.5 z-30 fixed md:relative top-0 inset-x-0 shadow-xl">
       <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-2.5">
         
-        {/* Title & Brand */}
+        {/* Title & Brand: The Bird Book */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <img
               src="/logo.svg"
-              alt="Birdbook Logo"
+              alt="The Bird Book Logo"
               className="w-8 h-8 md:w-9 md:h-9 object-contain drop-shadow-md rounded-full bg-slate-900 border border-slate-750"
             />
             <div>
               <h1 className="font-extrabold text-sm md:text-lg tracking-tight flex items-center gap-1.5 md:gap-2">
-                <span>Birdbook</span>
+                <span>The Bird Book</span>
                 <span className="text-[9px] md:text-[10px] uppercase font-bold tracking-widest bg-emerald-500/10 text-emerald-400 px-1.5 md:px-2 py-0.5 rounded border border-emerald-500/20">
                   USA eBird 2.0
                 </span>
               </h1>
               <p className="text-[11px] text-slate-400 hidden sm:block">
-                Nationwide Birding, Urban Flyways & Roost Tracker
+                Nationwide Tracking, Local Roosts & Live eBird Telemetry
               </p>
             </div>
           </div>
@@ -156,7 +156,7 @@ export const Header: React.FC<HeaderProps> = ({
               onClick={onLocateMe}
               disabled={isLocating}
               className="p-1.5 rounded-lg bg-sky-600/90 text-white border border-sky-500 active:scale-95"
-              title="Use GPS Location"
+              title="Current Location (GPS Nearby)"
             >
               <Navigation size={15} className={isLocating ? 'animate-spin' : ''} />
             </button>
@@ -193,14 +193,14 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Center: Region Selector & Nationwide Search Bar */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-1 md:max-w-2xl md:mx-3">
           
-          {/* 1. Location / Region Selector Dropdown */}
+          {/* 1. Nationwide & State Region Switching Dropdown */}
           <div className="relative" ref={regionMenuRef}>
             <button
               onClick={() => setIsRegionMenuOpen(!isRegionMenuOpen)}
               className="w-full sm:w-auto flex items-center justify-between gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-850 border border-slate-750 hover:border-slate-600 rounded-lg text-xs font-semibold text-slate-200 transition-colors shadow-sm"
-              title="Switch Region or State"
+              title="Switch Region, State, or GPS"
             >
-              <span className="flex items-center gap-1.5 truncate max-w-[190px]">
+              <span className="flex items-center gap-1.5 truncate max-w-[210px]">
                 {getRegionIcon(currentRegion)}
                 <span className="truncate">{currentRegion.name}</span>
               </span>
@@ -209,10 +209,10 @@ export const Header: React.FC<HeaderProps> = ({
 
             {/* Region Dropdown Menu */}
             {isRegionMenuOpen && (
-              <div className="absolute top-full left-0 mt-1.5 w-80 max-w-[92vw] bg-slate-900 border border-slate-750 rounded-xl shadow-2xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-100">
+              <div className="absolute top-full left-0 mt-1.5 w-84 max-w-[94vw] bg-slate-900 border border-slate-750 rounded-xl shadow-2xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-100">
                 <div className="p-2 border-b border-slate-800 bg-slate-950/70">
                   <div className="text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-1.5">
-                    Select Coverage Scope
+                    Coverage Scope
                   </div>
                   <div className="space-y-1">
                     {PRIMARY_REGIONS.map((reg) => (
@@ -244,11 +244,11 @@ export const Header: React.FC<HeaderProps> = ({
                   </div>
                 </div>
 
-                {/* State Search Section */}
+                {/* All 50 US States Search Section */}
                 <div className="p-2.5">
                   <div className="text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-1.5 flex items-center justify-between">
-                    <span>US State Search</span>
-                    <span className="text-[10px] text-slate-400">50 States + DC</span>
+                    <span>All 50 US States</span>
+                    <span className="text-[10px] text-slate-400">US-XX format</span>
                   </div>
                   <div className="relative mb-2">
                     <Search className="absolute left-2.5 top-2 text-slate-400" size={13} />
@@ -256,7 +256,7 @@ export const Header: React.FC<HeaderProps> = ({
                       type="text"
                       value={stateSearchText}
                       onChange={(e) => setStateSearchText(e.target.value)}
-                      placeholder="Type state (e.g. CA, NY, TX, Florida)..."
+                      placeholder="Search state (e.g. US-OR, US-WA, CA, NY)..."
                       className="w-full bg-slate-950 border border-slate-750 rounded-lg pl-8 pr-3 py-1 text-xs text-slate-100 placeholder-slate-400 focus:outline-none focus:border-emerald-500"
                     />
                   </div>
@@ -268,13 +268,14 @@ export const Header: React.FC<HeaderProps> = ({
                         onClick={() => {
                           const stateRegion: RegionConfig = {
                             id: `state-${st.code.toLowerCase()}`,
-                            name: `${st.name} (${st.code})`,
+                            name: `${st.code} - ${st.name}`,
                             category: 'state',
                             regionCode: st.code,
                             center: st.center,
                             zoom: st.zoom,
-                            description: `Live observations from ${st.name}.`,
-                            endpoint: `data/obs/${st.code}/recent?back=7`,
+                            bounds: st.bounds,
+                            description: `Live observations from ${st.name} (${st.code}).`,
+                            endpoint: `data/obs/${st.code}/recent/notable?detail=full&back=7`,
                           };
                           onSelectRegion(stateRegion);
                           setIsRegionMenuOpen(false);
@@ -286,14 +287,14 @@ export const Header: React.FC<HeaderProps> = ({
                             : 'hover:bg-slate-800 text-slate-300'
                         }`}
                       >
-                        <span>{st.name}</span>
+                        <span className="font-semibold">{st.code} - {st.name}</span>
                         <span className="text-[10px] font-mono bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded">
                           {st.code}
                         </span>
                       </button>
                     ))}
                     {filteredStates.length === 0 && (
-                      <div className="text-center py-3 text-xs text-slate-400">No states match search</div>
+                      <div className="text-center py-3 text-xs text-slate-400">No matching states found</div>
                     )}
                   </div>
                 </div>
@@ -367,7 +368,7 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={onLocateMe}
             disabled={isLocating}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600/90 hover:bg-blue-500 border border-blue-400/80 text-white font-bold text-xs rounded-lg transition-all shadow-sm active:scale-95 disabled:opacity-50"
-            title="Center on my GPS coordinates (30-mile radius)"
+            title="Current Location (GPS Nearby - 30 miles / 50 km)"
           >
             <Navigation size={14} className={isLocating ? 'animate-spin' : ''} />
             <span>{isLocating ? 'Locating...' : 'Locate Me'}</span>
@@ -450,7 +451,6 @@ export const Header: React.FC<HeaderProps> = ({
           <span>eBird Hotspots</span>
         </button>
 
-        {/* Quick Filter: Best to View Right Now */}
         {onToggleFilterBestNow && (
           <button
             onClick={onToggleFilterBestNow}
