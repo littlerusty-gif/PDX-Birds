@@ -132,6 +132,8 @@ app.get('/api/birds/recent', async (req: Request, res: Response) => {
     obsReviewed: true,
     subId: 'COMMUNITY',
     direction: rep.direction,
+    originStagingArea: rep.originStagingArea,
+    flightHeadingDeg: rep.flightHeadingDeg,
     isCrowRoost: rep.count >= 250,
     notes: `${rep.behavior}: ${rep.notes}`
   }));
@@ -161,7 +163,7 @@ app.get('/api/birds/reports', (_req: Request, res: Response) => {
 });
 
 app.post('/api/birds/reports', (req: Request, res: Response) => {
-  const { species, count, locationName, lat, lng, direction, behavior, notes } = req.body;
+  const { species, count, locationName, lat, lng, direction, behavior, notes, originStagingArea, flightHeadingDeg } = req.body;
   if (!locationName || !count) {
     return res.status(400).json({ error: 'Location and flock count required' });
   }
@@ -176,6 +178,8 @@ app.post('/api/birds/reports', (req: Request, res: Response) => {
     direction: direction || 'SW toward Downtown',
     behavior: behavior || 'Mega-Roost',
     notes: notes || '',
+    originStagingArea: originStagingArea || 'East Multnomah / Lloyd Staging',
+    flightHeadingDeg: Number(flightHeadingDeg) || 225,
     timestamp: Date.now()
   };
 

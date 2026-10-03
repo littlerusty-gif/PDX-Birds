@@ -42,3 +42,78 @@
   border-left: 1px solid #10b981;
   border-top: 1px solid #10b981;
 }
+
+/* Animated Flight Trajectory Polylines */
+@keyframes flowDash {
+  from {
+    stroke-dashoffset: 28;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.flight-trajectory-polyline {
+  stroke-dasharray: 8, 8 !important;
+  animation: flowDash 1.2s linear infinite;
+  pointer-events: visibleStroke;
+}
+
+@keyframes pulseArrowGlow {
+  0%, 100% {
+    transform: scale(0.95);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 1;
+    filter: drop-shadow(0 0 6px currentColor);
+  }
+}
+
+.pulsating-flight-arrow {
+  animation: pulseArrowGlow 1.4s ease-in-out infinite;
+}
+
+/* Flying Bird Silhouette Glyphs */
+@keyframes flapGlide {
+  0% {
+    transform: scaleY(1) translateY(0px);
+  }
+  25% {
+    transform: scaleY(0.55) translateY(-2px);
+  }
+  50% {
+    transform: scaleY(0.9) translateY(0px);
+  }
+  75% {
+    transform: scaleY(0.6) translateY(-1px);
+  }
+  100% {
+    transform: scaleY(1) translateY(0px);
+  }
+}
+
+.animated-flying-bird {
+  display: inline-block;
+  animation: flapGlide 0.65s ease-in-out infinite;
+  transform-origin: center center;
+  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.7));
+}
+
+.flying-bird-marker-container {
+  pointer-events: none !important;
+  border: none !important;
+  background: transparent !important;
+}
+
+.directional-arrow-decorator {
+  pointer-events: none !important;
+  border: none !important;
+  background: transparent !important;
+  opacity: 0.9;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.9));
+  transition: transform 0.15s ease-out;
+}
+
+

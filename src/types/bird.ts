@@ -14,6 +14,9 @@ export interface Observation {
   direction?: string;
   isCrowRoost?: boolean;
   notes?: string;
+  originStagingArea?: string;
+  flightHeadingDeg?: number;
+  trajectoryCoords?: [number, number][];
 }
 
 export interface Hotspot {
@@ -44,6 +47,21 @@ export interface CrowRoostReport {
   behavior: string;
   notes: string;
   timestamp: number;
+  originStagingArea?: string;
+  flightHeadingDeg?: number;
 }
 
-export type ViewMode = 'species' | 'recent' | 'notable' | 'hotspots';
+export interface FlightCorridor {
+  id: string;
+  name: string;
+  corridorName: string;
+  timeWindow: string;
+  heading: string;
+  headingDeg: number;
+  estFlockSize: number;
+  description: string;
+  coordinates: [number, number][];
+  color: string;
+}
+
+export type ViewMode = 'species' | 'recent' | 'notable' | 'hotspots' | 'routes';

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Observation, Hotspot } from '../types/bird';
-import { ExternalLink, Navigation, CheckCircle2, X, Sparkles, MapPin } from 'lucide-react';
+import { SPECIES_FORECASTS, isSpeciesOptimalNow } from '../data/viewingForecast';
+import { ExternalLink, Navigation, CheckCircle2, X, Sparkles, MapPin, Compass, Clock } from 'lucide-react';
 
 interface MobileBottomSheetProps {
   item: Observation | Hotspot | null;
@@ -102,6 +103,30 @@ export const MobileBottomSheet: React.FC<MobileBottomSheetProps> = ({ item, onCl
           <div className="flex items-center gap-2 text-xs text-slate-300 mb-2 bg-slate-850 p-2 rounded-lg border border-slate-800">
             <MapPin size={14} className="text-emerald-400 flex-shrink-0" />
             <span className="font-medium">{obs.locName}</span>
+          </div>
+        )}
+
+        {/* Optimal Viewing Window Badge */}
+        {obs && SPECIES_FORECASTS[obs.speciesCode.toLowerCase()] && (
+          <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+            <span className="bg-amber-950/60 border border-amber-800/40 text-amber-300 text-[10px] font-semibold px-2 py-0.5 rounded flex items-center gap-1">
+              <Clock size={10} className="text-amber-400" />
+              <span>{SPECIES_FORECASTS[obs.speciesCode.toLowerCase()].optimalWindowBadge}</span>
+            </span>
+            {isSpeciesOptimalNow(obs.speciesCode) && (
+              <span className="bg-emerald-500 text-slate-950 font-bold text-[9px] px-1.5 py-0.5 rounded-full animate-pulse flex items-center gap-0.5">
+                <Sparkles size={9} />
+                <span>PEAK NOW</span>
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Origin Staging Area */}
+        {obs?.originStagingArea && (
+          <div className="bg-sky-950/70 border border-sky-800/60 text-sky-300 p-2 rounded-lg text-xs font-semibold flex items-center gap-2 mb-2">
+            <Compass size={14} className="text-sky-400 flex-shrink-0" />
+            <span>Origin: {obs.originStagingArea}</span>
           </div>
         )}
 

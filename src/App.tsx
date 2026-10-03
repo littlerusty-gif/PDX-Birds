@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import { Observation, Hotspot, ViewMode, TaxonomyItem, CrowRoostReport } from './types/bird';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Observation, Hotspot, ViewMode, TaxonomyItem, CrowRoostReport, FlightCorridor } from './types/bird';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { Map } from './components/Map';
 import { ReportModal } from './components/ReportModal';
 import { AiRoostWidget } from './components/AiRoostWidget';
 import { MobileBottomSheet } from './components/MobileBottomSheet';
-import { MOCK_OBSERVATIONS, MOCK_NOTABLE, MOCK_HOTSPOTS } from './data/mockPortlandData';
+import { MOCK_OBSERVATIONS, MOCK_NOTABLE, MOCK_HOTSPOTS, FLIGHT_CORRIDORS } from './data/mockPortlandData';
+import { isSpeciesOptimalNow } from './data/viewingForecast';
 
 export const App: React.FC = () => {
   const [mode, setMode] = useState<ViewMode>('recent');
@@ -14,6 +15,8 @@ export const App: React.FC = () => {
   const [observations, setObservations] = useState<Observation[]>(MOCK_OBSERVATIONS);
   const [hotspots, setHotspots] = useState<Hotspot[]>(MOCK_HOTSPOTS);
   const [selectedItem, setSelectedItem] = useState<Observation | Hotspot | null>(null);
+  const [selectedCorridor, setSelectedCorridor] = useState<FlightCorridor | null>(null);
+  const [filterBestNow, setFilterBestNow] = useState<boolean>(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(typeof window !== 'undefined' ? window.innerWidth >= 768 : false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [isAiWidgetOpen, setIsAiWidgetOpen] = useState(false);
@@ -61,39 +64,64 @@ export const App: React.FC = () => {
     fetchData();
   }, [mode, selectedSpecies]);
 
-  // Handle reporting new community roost sighting
+  // Filter observations when "Best to View Right Now" quick filter is active
+  const displayedObservations = useMemo(() => {
+    if (!filterBestNow) return observations;
+    return observations.filter((obs) => isSpeciesOptimalNow(obs.speciesCode));
+  }, [observations, filterBestNow]);
+
+  // Handle reporting new community roost sighting with flight vector calculation
   const handleReportSighting = async (report: Omit<CrowRoostReport, 'id' | 'timestamp'>) => {
     try {
-      const res = await fetch('/api/birds/reports', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(report),
-      });
-      const newRep = await res.json();
+      let newRep = report as any;
+      try {
+        const res = await fetch('/api/birds/reports', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(report),
+        });
+        newRep = await res.json();
+      } catch (postErr) {
+        console.warn('Proxy post failed, appending locally:', postErr);
+      }
+
+      // Calculate back-traced vector pointing toward the sighting pin
+      const heading = report.flightHeadingDeg ?? 225;
+      const backAngle = (heading + 180) % 360;
+      const originLat = report.lat + Math.cos((backAngle * Math.PI) / 180) * 0.024;
+      const originLng =
+        report.lng + (Math.sin((backAngle * Math.PI) / 180) * 0.024) / Math.cos((report.lat * Math.PI) / 180);
+      const trajectoryCoords: [number, number][] = [
+        [originLat, originLng],
+        [report.lat, report.lng],
+      ];
 
       // Add to current observation feed directly
       const newObs: Observation = {
-        id: `comm-${newRep.id}`,
+        id: `comm-${newRep.id || Date.now()}`,
         speciesCode: 'amecro',
-        comName: `${newRep.species} (Community Sighting)`,
+        comName: `${newRep.species || report.species} (Community Sighting)`,
         sciName: 'Corvus brachyrhynchos',
         locId: 'COMM_PDX',
-        locName: newRep.locationName,
+        locName: newRep.locationName || report.locationName,
         obsDt: 'Just now',
-        howMany: newRep.count,
-        lat: newRep.lat,
-        lng: newRep.lng,
+        howMany: newRep.count || report.count,
+        lat: newRep.lat || report.lat,
+        lng: newRep.lng || report.lng,
         obsReviewed: true,
         subId: 'COMMUNITY',
-        direction: newRep.direction,
-        isCrowRoost: newRep.count >= 250,
-        notes: `${newRep.behavior}: ${newRep.notes}`
+        direction: newRep.direction || report.direction,
+        originStagingArea: newRep.originStagingArea || report.originStagingArea,
+        flightHeadingDeg: heading,
+        trajectoryCoords,
+        isCrowRoost: (newRep.count || report.count) >= 250,
+        notes: `${newRep.behavior || report.behavior}: ${newRep.notes || report.notes}`,
       };
 
       setObservations(prev => [newObs, ...prev]);
       setSelectedItem(newObs);
     } catch (err) {
-      console.error('Failed to post community report:', err);
+      console.error('Failed to process community report:', err);
     }
   };
 
@@ -110,6 +138,7 @@ export const App: React.FC = () => {
         onSetMode={(m) => {
           setMode(m);
           setSelectedItem(null);
+          setSelectedCorridor(null);
         }}
         selectedSpecies={selectedSpecies}
         onSelectSpecies={(sp) => {
@@ -120,29 +149,51 @@ export const App: React.FC = () => {
         onOpenAiWidget={() => handleOpenAiWithQuestion()}
         isSidebarOpen={isSidebarOpen}
         onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+        filterBestNow={filterBestNow}
+        onToggleFilterBestNow={() => setFilterBestNow(prev => !prev)}
       />
 
       {/* Main Viewport Container */}
       <div className="relative flex-1 w-full h-[100dvh] md:h-full min-h-[500px] overflow-hidden flex">
-        {/* Collapsible Observation List Sidebar */}
+        {/* Collapsible Observation & Origin Routes Sidebar */}
         <Sidebar
           isOpen={isSidebarOpen}
           onToggle={() => setIsSidebarOpen(!isSidebarOpen)}
           mode={mode}
-          observations={observations}
+          observations={displayedObservations}
           hotspots={hotspots}
           selectedItem={selectedItem}
-          onSelectItem={(item) => setSelectedItem(item)}
+          onSelectItem={(item) => {
+            setSelectedItem(item);
+            setSelectedCorridor(null);
+          }}
           isLoading={isLoading}
+          corridors={FLIGHT_CORRIDORS}
+          selectedCorridor={selectedCorridor}
+          onSelectCorridor={(corridor) => {
+            setSelectedCorridor(corridor);
+            setSelectedItem(null);
+          }}
+          filterBestNow={filterBestNow}
+          onToggleFilterBestNow={() => setFilterBestNow(prev => !prev)}
         />
 
-        {/* 100% Viewport Height Leaflet Map (100dvh) with touch-drag enabled */}
+        {/* 100% Viewport Height Leaflet Map with Flight Paths & Inbound Vectors */}
         <Map
-          observations={observations}
+          observations={displayedObservations}
           hotspots={hotspots}
           selectedItem={selectedItem}
           mode={mode}
-          onSelectItem={(item) => setSelectedItem(item)}
+          onSelectItem={(item) => {
+            setSelectedItem(item);
+            setSelectedCorridor(null);
+          }}
+          corridors={FLIGHT_CORRIDORS}
+          selectedCorridor={selectedCorridor}
+          onSelectCorridor={(corridor) => {
+            setSelectedCorridor(corridor);
+            setSelectedItem(null);
+          }}
         />
       </div>
 
@@ -160,11 +211,14 @@ export const App: React.FC = () => {
         onSubmit={handleReportSighting}
       />
 
-      {/* Gemini AI Roost Intelligence Widget */}
+      {/* Gemini AI Roost Intelligence & Optimal Viewing Forecast Widget */}
       <AiRoostWidget
         isOpen={isAiWidgetOpen}
         onClose={() => setIsAiWidgetOpen(false)}
         initialQuestion={aiCustomQuestion}
+        observations={observations}
+        filterBestNow={filterBestNow}
+        onToggleFilterBestNow={() => setFilterBestNow(prev => !prev)}
       />
     </div>
   );

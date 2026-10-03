@@ -12,6 +12,8 @@ interface HeaderProps {
   onOpenAiWidget: () => void;
   isSidebarOpen?: boolean;
   onToggleSidebar?: () => void;
+  filterBestNow?: boolean;
+  onToggleFilterBestNow?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -23,6 +25,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAiWidget,
   isSidebarOpen,
   onToggleSidebar,
+  filterBestNow = false,
+  onToggleFilterBestNow,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -52,15 +56,17 @@ export const Header: React.FC<HeaderProps> = ({
         
         {/* Title & Brand */}
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 md:w-8 md:h-8 rounded-lg bg-emerald-500 flex items-center justify-center text-slate-950 font-bold shadow-md shadow-emerald-500/20">
-              <Feather size={18} />
-            </div>
+          <div className="flex items-center gap-2.5">
+            <img
+              src="/logo.svg"
+              alt="Birdbook Logo"
+              className="w-8 h-8 md:w-9 md:h-9 object-contain drop-shadow-md rounded-full bg-slate-900 border border-slate-750"
+            />
             <div>
               <h1 className="font-extrabold text-sm md:text-lg tracking-tight flex items-center gap-1.5 md:gap-2">
-                <span>PDX Bird & Crow</span>
+                <span>Birdbook</span>
                 <span className="text-[9px] md:text-[10px] uppercase font-bold tracking-widest bg-emerald-500/10 text-emerald-400 px-1.5 md:px-2 py-0.5 rounded border border-emerald-500/20">
-                  eBird 2.0
+                  PDX eBird
                 </span>
               </h1>
               <p className="text-[11px] text-slate-400 hidden sm:block">
@@ -236,6 +242,21 @@ export const Header: React.FC<HeaderProps> = ({
           <MapPin size={13} />
           <span>Hotspots</span>
         </button>
+
+        {onToggleFilterBestNow && (
+          <button
+            onClick={onToggleFilterBestNow}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md font-bold whitespace-nowrap transition-all text-[11px] md:text-xs ml-auto border ${
+              filterBestNow
+                ? 'bg-gradient-to-r from-amber-400 to-amber-500 text-slate-950 border-amber-300 shadow-md shadow-amber-500/20'
+                : 'bg-slate-900/90 text-amber-300 hover:bg-slate-800 border-amber-500/40'
+            }`}
+            title="Filter species whose peak viewing window matches current local time"
+          >
+            <Sparkles size={13} className={filterBestNow ? 'fill-current animate-pulse' : ''} />
+            <span>Best to View Right Now</span>
+          </button>
+        )}
       </div>
     </header>
   );

@@ -1,0 +1,29 @@
+{
+  "name": "Birdbook",
+  "short_name": "Birdbook",
+  "description": "Birdbook - Portland urban birding, flight paths, and crow mega-roost tracker",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#1b2038",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/logo.svg",
+      "type": "image/svg+xml",
+      "sizes": "any"
+    }
+  ]
+}

@@ -1,19 +1,29 @@
-import React, { useEffect } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import React, { useEffect, useState, useMemo } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { Observation, Hotspot } from '../types/bird';
-import { ExternalLink, Navigation, CheckCircle2 } from 'lucide-react';
+import { Observation, Hotspot, FlightCorridor, ViewMode } from '../types/bird';
+import { SPECIES_FORECASTS, isSpeciesOptimalNow } from '../data/viewingForecast';
+import { ExternalLink, Navigation, CheckCircle2, Compass, Wind, Layers, Clock, Sparkles } from 'lucide-react';
 
 interface MapProps {
   observations: Observation[];
   hotspots?: Hotspot[];
   selectedItem: Observation | Hotspot | null;
-  mode: 'species' | 'recent' | 'notable' | 'hotspots';
+  mode: ViewMode;
   onSelectItem: (item: Observation | Hotspot) => void;
+  corridors?: FlightCorridor[];
+  selectedCorridor?: FlightCorridor | null;
+  onSelectCorridor?: (corridor: FlightCorridor | null) => void;
 }
 
-// Map controller to invalidate sizing and handle smooth pan/zoom
-function MapController({ item }: { item: Observation | Hotspot | null }) {
+// Controller component to smoothly fly to selected item or corridor
+function MapController({
+  item,
+  selectedCorridor,
+}: {
+  item: Observation | Hotspot | null;
+  selectedCorridor?: FlightCorridor | null;
+}) {
   const map = useMap();
 
   useEffect(() => {
@@ -39,7 +49,70 @@ function MapController({ item }: { item: Observation | Hotspot | null }) {
     }
   }, [item, map]);
 
+  useEffect(() => {
+    if (selectedCorridor && selectedCorridor.coordinates.length > 0) {
+      const bounds = L.latLngBounds(selectedCorridor.coordinates);
+      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14, duration: 1.2 });
+    }
+  }, [selectedCorridor, map]);
+
   return null;
+}
+
+// Bearing helper
+function calculateBearing(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const dLng = (lng2 - lng1) * (Math.PI / 180);
+  const y = Math.sin(dLng) * Math.cos(lat2 * (Math.PI / 180));
+  const x =
+    Math.cos(lat1 * (Math.PI / 180)) * Math.sin(lat2 * (Math.PI / 180)) -
+    Math.sin(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.cos(dLng);
+  const brng = Math.atan2(y, x) * (180 / Math.PI);
+  return (brng + 360) % 360;
+}
+
+// Interpolate point along a sequence of coordinates according to progress 0.0 -> 1.0
+function getPositionAtProgress(
+  coords: [number, number][],
+  progress: number
+): { lat: number; lng: number; bearing: number } {
+  if (coords.length === 0) return { lat: 0, lng: 0, bearing: 0 };
+  if (coords.length === 1) return { lat: coords[0][0], lng: coords[0][1], bearing: 0 };
+
+  const segmentLengths: number[] = [];
+  let totalLength = 0;
+  for (let i = 0; i < coords.length - 1; i++) {
+    const latDiff = coords[i + 1][0] - coords[i][0];
+    const lngDiff = coords[i + 1][1] - coords[i][1];
+    const len = Math.hypot(latDiff, lngDiff);
+    segmentLengths.push(len);
+    totalLength += len;
+  }
+
+  if (totalLength === 0) return { lat: coords[0][0], lng: coords[0][1], bearing: 0 };
+
+  // Loop cleanly between 0 and 1
+  const targetDist = (((progress % 1) + 1) % 1) * totalLength;
+  let accumulated = 0;
+
+  for (let i = 0; i < segmentLengths.length; i++) {
+    const segLen = segmentLengths[i];
+    if (accumulated + segLen >= targetDist || i === segmentLengths.length - 1) {
+      const segT = segLen > 0 ? (targetDist - accumulated) / segLen : 0;
+      const lat = coords[i][0] + (coords[i + 1][0] - coords[i][0]) * segT;
+      const lng = coords[i][1] + (coords[i + 1][1] - coords[i][1]) * segT;
+      const bearing = calculateBearing(coords[i][0], coords[i][1], coords[i + 1][0], coords[i + 1][1]);
+      return { lat, lng, bearing };
+    }
+    accumulated += segLen;
+  }
+
+  const last = coords[coords.length - 1];
+  const secondLast = coords[coords.length - 2];
+  return {
+    lat: last[0],
+    lng: last[1],
+    bearing: calculateBearing(secondLast[0], secondLast[1], last[0], last[1]),
+  };
 }
 
 export const Map: React.FC<MapProps> = ({
@@ -48,8 +121,22 @@ export const Map: React.FC<MapProps> = ({
   selectedItem,
   mode,
   onSelectItem,
+  corridors = [],
+  selectedCorridor = null,
+  onSelectCorridor,
 }) => {
   const portlandCenter: [number, number] = [45.5152, -122.6784];
+  const [showFlightPaths, setShowFlightPaths] = useState<boolean>(true);
+  const [animationProgress, setAnimationProgress] = useState<number>(0);
+
+  // Smooth continuous flight animation loop for traveling bird silhouettes
+  useEffect(() => {
+    if (!showFlightPaths) return;
+    const interval = setInterval(() => {
+      setAnimationProgress((prev) => (prev + 0.0035) % 1);
+    }, 40); // 25 FPS smooth continuous loop
+    return () => clearInterval(interval);
+  }, [showFlightPaths]);
 
   // Custom graduated HTML markers with color coding and glowing pulse for roosts
   const createObservationIcon = (obs: Observation) => {
@@ -70,7 +157,7 @@ export const Map: React.FC<MapProps> = ({
       size = 22;
     }
 
-    // Directional vector transit arrow
+    // Transit direction arrow icon
     let arrowHtml = '';
     if (obs.direction) {
       let arrowChar = '➔';
@@ -83,7 +170,6 @@ export const Map: React.FC<MapProps> = ({
     }
 
     if (isRoost) {
-      // Crimson pulse marker for roosts
       return L.divIcon({
         className: 'relative flex items-center justify-center',
         html: `
@@ -100,7 +186,6 @@ export const Map: React.FC<MapProps> = ({
       });
     }
 
-    // Standard graduated circular marker
     return L.divIcon({
       className: 'relative',
       html: `
@@ -128,11 +213,109 @@ export const Map: React.FC<MapProps> = ({
     });
   };
 
+  // Directional arrowhead decorator spaced along corridor segments
+  const createArrowDecoratorIcon = (bearingDeg: number, color: string) => {
+    return L.divIcon({
+      className: 'directional-arrow-decorator',
+      html: `
+        <div style="transform: rotate(${bearingDeg}deg); color: ${color};" class="flex items-center justify-center opacity-90 drop-shadow">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2L3 19l9-4 9 4L12 2z" />
+          </svg>
+        </div>
+      `,
+      iconSize: [16, 16],
+      iconAnchor: [8, 8],
+    });
+  };
+
+  // Animated flying bird silhouette glyph traveling along polyline path
+  const createFlyingBirdIcon = (bearingDeg: number, color: string, isLead: boolean = false) => {
+    const size = isLead ? 26 : 21;
+    return L.divIcon({
+      className: 'flying-bird-marker-container pointer-events-none',
+      html: `
+        <div style="transform: rotate(${bearingDeg}deg);" class="flex items-center justify-center">
+          <div class="animated-flying-bird" style="color: ${color};">
+            <svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="currentColor">
+              <!-- Outstretched curved flapping wings crow/swift silhouette -->
+              <path d="M22 6c-4.5 1-8.5 4.5-10 9C10.5 10.5 6.5 7 2 6c3 5 4.5 11 4.5 11l4.5-3 1 3 1-3 4.5 3s1.5-6 4.5-11z" />
+            </svg>
+          </div>
+        </div>
+      `,
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size / 2],
+    });
+  };
+
+  // Compute trajectory polylines and intermediate markers for active observations
+  const observationTrajectories = useMemo(() => {
+    return observations
+      .filter((obs) => obs.trajectoryCoords || obs.direction || obs.flightHeadingDeg)
+      .map((obs) => {
+        let coords = obs.trajectoryCoords;
+        if (!coords || coords.length < 2) {
+          // Derive back-traced vector
+          let heading = obs.flightHeadingDeg ?? 225;
+          if (!obs.flightHeadingDeg && obs.direction) {
+            if (obs.direction.includes('SW')) heading = 225;
+            else if (obs.direction.includes('West') || obs.direction.includes('W')) heading = 270;
+            else if (obs.direction.includes('Northbound')) heading = 0;
+            else if (obs.direction.includes('Southbound')) heading = 180;
+          }
+          const backAngle = (heading + 180) % 360;
+          const originLat = obs.lat + Math.cos((backAngle * Math.PI) / 180) * 0.024;
+          const originLng =
+            obs.lng + (Math.sin((backAngle * Math.PI) / 180) * 0.024) / Math.cos((obs.lat * Math.PI) / 180);
+          coords = [
+            [originLat, originLng],
+            [obs.lat, obs.lng],
+          ];
+        }
+
+        // Calculate segment intermediate points and bearing for directional arrows
+        const start = coords[coords.length - 2];
+        const end = coords[coords.length - 1];
+        const bearing = calculateBearing(start[0], start[1], end[0], end[1]);
+
+        const mid = [
+          start[0] + (end[0] - start[0]) * 0.5,
+          start[1] + (end[1] - start[1]) * 0.5,
+        ] as [number, number];
+
+        return {
+          id: obs.id,
+          obs,
+          coords,
+          mid,
+          bearing,
+          isRoost: obs.isCrowRoost || (obs.howMany || 0) >= 250,
+        };
+      });
+  }, [observations]);
+
   return (
     <div
       className="w-full h-full min-h-[500px] flex-1 relative z-0 touch-pan-x touch-pan-y"
       style={{ width: '100%', height: '100%', minHeight: '100%' }}
     >
+      {/* Flight Paths Toggle Control Button */}
+      <div className="absolute top-4 right-4 z-[400] flex items-center gap-2">
+        <button
+          onClick={() => setShowFlightPaths(!showFlightPaths)}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xl border backdrop-blur-md ${
+            showFlightPaths
+              ? 'bg-sky-500/90 hover:bg-sky-400 text-slate-950 border-sky-400/80 shadow-sky-500/20'
+              : 'bg-slate-900/90 hover:bg-slate-800 text-slate-300 border-slate-700'
+          }`}
+          title="Toggle Animated Inbound Flight Trajectories and Flying Bird Silhouettes"
+        >
+          <Wind size={13} className={showFlightPaths ? 'animate-pulse' : ''} />
+          <span>Flight Paths {showFlightPaths ? 'ON' : 'OFF'}</span>
+        </button>
+      </div>
+
       <MapContainer
         center={portlandCenter}
         zoom={12}
@@ -151,7 +334,143 @@ export const Map: React.FC<MapProps> = ({
           maxZoom={19}
         />
 
-        <MapController item={selectedItem} />
+        <MapController item={selectedItem} selectedCorridor={selectedCorridor} />
+
+        {/* Major Flight Corridors & Animated Flight Silhouettes (Parented to Flight Paths Layer) */}
+        {showFlightPaths &&
+          corridors.map((corridor) => {
+            const isSelected = selectedCorridor?.id === corridor.id;
+
+            // Generate intermediate directional arrow decorators spaced along each leg
+            const legArrowMarkers: { pos: [number, number]; bearing: number; key: string }[] = [];
+            for (let i = 0; i < corridor.coordinates.length - 1; i++) {
+              const p1 = corridor.coordinates[i];
+              const p2 = corridor.coordinates[i + 1];
+              const bearing = calculateBearing(p1[0], p1[1], p2[0], p2[1]);
+              const legLen = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
+
+              // Place 2 arrows on longer legs, 1 on shorter legs
+              const ratios = legLen > 0.015 ? [0.35, 0.72] : [0.5];
+              ratios.forEach((ratio, rIdx) => {
+                legArrowMarkers.push({
+                  pos: [p1[0] + (p2[0] - p1[0]) * ratio, p1[1] + (p2[1] - p1[1]) * ratio],
+                  bearing,
+                  key: `${corridor.id}-leg-${i}-${rIdx}`,
+                });
+              });
+            }
+
+            // Calculate animated flying bird silhouette positions along corridor path
+            // 3 staggered flock birds per corridor
+            const birdOffsets = [0, 0.36, 0.72];
+            const flyingBirds = birdOffsets.map((offset, bIdx) => {
+              const t = (animationProgress + offset) % 1;
+              const pos = getPositionAtProgress(corridor.coordinates, t);
+              return {
+                pos: [pos.lat, pos.lng] as [number, number],
+                bearing: pos.bearing,
+                isLead: bIdx === 0,
+                key: `${corridor.id}-bird-${bIdx}`,
+              };
+            });
+
+            return (
+              <React.Fragment key={corridor.id}>
+                {/* Glowing Background Glow Line */}
+                <Polyline
+                  positions={corridor.coordinates}
+                  pathOptions={{
+                    color: corridor.color,
+                    weight: isSelected ? 8 : 5,
+                    opacity: isSelected ? 0.45 : 0.28,
+                    lineCap: 'round',
+                  }}
+                />
+
+                {/* Animated Dashed Trajectory Polyline */}
+                <Polyline
+                  positions={corridor.coordinates}
+                  pathOptions={{
+                    color: corridor.color,
+                    weight: isSelected ? 4 : 2.8,
+                    opacity: 0.95,
+                    dashArray: '8, 8',
+                    className: 'flight-trajectory-polyline',
+                  }}
+                  eventHandlers={{
+                    click: () => onSelectCorridor && onSelectCorridor(corridor),
+                  }}
+                >
+                  <Tooltip sticky direction="top" className="custom-leaflet-tooltip">
+                    <div className="text-xs font-semibold p-1">
+                      <div className="font-bold text-sky-400">{corridor.name}</div>
+                      <div className="text-slate-200">Window: {corridor.timeWindow}</div>
+                      <div className="text-emerald-400 font-bold">~{corridor.estFlockSize.toLocaleString()} Crows</div>
+                    </div>
+                  </Tooltip>
+                </Polyline>
+
+                {/* Spaced Directional Arrowhead Decorators pointing toward Roost */}
+                {legArrowMarkers.map((arrow) => (
+                  <Marker
+                    key={arrow.key}
+                    position={arrow.pos}
+                    icon={createArrowDecoratorIcon(arrow.bearing, corridor.color)}
+                    interactive={false}
+                  />
+                ))}
+
+                {/* Animated Flying Bird Silhouette Glyphs traveling toward Convergence */}
+                {flyingBirds.map((bird) => (
+                  <Marker
+                    key={bird.key}
+                    position={bird.pos}
+                    icon={createFlyingBirdIcon(bird.bearing, corridor.color, bird.isLead)}
+                    interactive={false}
+                  />
+                ))}
+              </React.Fragment>
+            );
+          })}
+
+        {/* Observation-Specific Back-Traced Inbound Trajectories & Flying Glyphs */}
+        {showFlightPaths &&
+          observationTrajectories.map((traj) => {
+            const color = traj.isRoost ? '#ef4444' : '#38bdf8';
+            const birdPos = getPositionAtProgress(traj.coords, (animationProgress * 1.5) % 1);
+
+            return (
+              <React.Fragment key={`obs-traj-${traj.id}`}>
+                <Polyline
+                  positions={traj.coords}
+                  pathOptions={{
+                    color,
+                    weight: 2.5,
+                    opacity: 0.9,
+                    dashArray: '6, 6',
+                    className: 'flight-trajectory-polyline',
+                  }}
+                  eventHandlers={{
+                    click: () => onSelectItem(traj.obs),
+                  }}
+                />
+
+                {/* Segment Arrowhead */}
+                <Marker
+                  position={traj.mid}
+                  icon={createArrowDecoratorIcon(traj.bearing, color)}
+                  interactive={false}
+                />
+
+                {/* Animated Flying Bird on Observation Vector */}
+                <Marker
+                  position={[birdPos.lat, birdPos.lng]}
+                  icon={createFlyingBirdIcon(birdPos.bearing, color, true)}
+                  interactive={false}
+                />
+              </React.Fragment>
+            );
+          })}
 
         {/* Hotspots Mode */}
         {mode === 'hotspots' &&
@@ -188,7 +507,7 @@ export const Map: React.FC<MapProps> = ({
             </Marker>
           ))}
 
-        {/* Observations (Species, Recent, Notable) */}
+        {/* Observations (Species, Recent, Notable, Routes) */}
         {mode !== 'hotspots' &&
           observations.map((obs) => (
             <Marker
@@ -219,6 +538,29 @@ export const Map: React.FC<MapProps> = ({
                     <span className="text-emerald-400">📍</span>
                     <span className="truncate">{obs.locName}</span>
                   </div>
+
+                  {/* Optimal Viewing Window Badge */}
+                  {SPECIES_FORECASTS[obs.speciesCode.toLowerCase()] && (
+                    <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+                      <span className="bg-amber-950/60 border border-amber-800/40 text-amber-300 text-[10px] font-semibold px-2 py-0.5 rounded flex items-center gap-1">
+                        <Clock size={10} className="text-amber-400" />
+                        <span>{SPECIES_FORECASTS[obs.speciesCode.toLowerCase()].optimalWindowBadge}</span>
+                      </span>
+                      {isSpeciesOptimalNow(obs.speciesCode) && (
+                        <span className="bg-emerald-500 text-slate-950 font-bold text-[9px] px-1.5 py-0.5 rounded-full animate-pulse flex items-center gap-0.5">
+                          <Sparkles size={9} />
+                          <span>PEAK NOW</span>
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {obs.originStagingArea && (
+                    <div className="bg-slate-800/90 border border-sky-500/30 rounded px-2 py-1 text-xs text-sky-300 flex items-center gap-1.5 mb-1.5">
+                      <Compass size={12} className="text-sky-400" />
+                      <span>Origin: {obs.originStagingArea}</span>
+                    </div>
+                  )}
 
                   {obs.direction && (
                     <div className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-sky-300 flex items-center gap-1.5 mb-1.5">

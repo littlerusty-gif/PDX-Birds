@@ -1,4 +1,4 @@
-import { Observation, Hotspot, TaxonomyItem } from '../types/bird';
+import { Observation, Hotspot, TaxonomyItem, FlightCorridor } from '../types/bird';
 
 export const PNW_TAXONOMY: TaxonomyItem[] = [
   { comName: "American Crow", sciName: "Corvus brachyrhynchos", speciesCode: "amecro", familyComName: "Crows & Jays" },
@@ -24,6 +24,98 @@ export const PNW_TAXONOMY: TaxonomyItem[] = [
   { comName: "Snowy Owl", sciName: "Bubo scandiacus", speciesCode: "snoowl1", familyComName: "Owls" }
 ];
 
+export const FLIGHT_CORRIDORS: FlightCorridor[] = [
+  {
+    id: "corridor-eastside",
+    name: "East Multnomah / Lloyd Staging",
+    corridorName: "Eastside Corridor",
+    timeWindow: "4:45 PM - 5:30 PM",
+    heading: "Heading SW",
+    headingDeg: 225,
+    estFlockSize: 6200,
+    description: "Flocks aggregate on Lloyd Center roofs and Sullivan's Gulch trees before cutting southwest across the Willamette toward Hawthorne Bridge, Waterfront Park, and South Park Blocks.",
+    color: "#38bdf8", // Sky blue
+    coordinates: [
+      [45.5322, -122.6534], // Lloyd Center
+      [45.5225, -122.6610], // Central Eastside / Burnside
+      [45.5132, -122.6685], // Hawthorne Bridge
+      [45.5150, -122.6730], // Waterfront Park
+      [45.5186, -122.6816], // South Park Blocks
+    ],
+  },
+  {
+    id: "corridor-southeast",
+    name: "Southeast / Powell Corridor",
+    corridorName: "Powell & Mt. Tabor Flyway",
+    timeWindow: "5:15 PM - 6:00 PM",
+    heading: "Heading NW",
+    headingDeg: 315,
+    estFlockSize: 4800,
+    description: "Crows foraging near Mt. Tabor and Powell Park converge along SE Division and Powell Blvd, banking northwest over Hawthorne Bridge into Waterfront Park and South Park Blocks.",
+    color: "#fb923c", // Vibrant orange
+    coordinates: [
+      [45.5115, -122.5950], // Mt. Tabor Staging
+      [45.5040, -122.6280], // SE Powell & 33rd
+      [45.5085, -122.6560], // Ladd's Addition / Central Eastside
+      [45.5132, -122.6685], // Hawthorne Bridge East Pier
+      [45.5150, -122.6730], // Waterfront Park
+      [45.5186, -122.6816], // South Park Blocks
+    ],
+  },
+  {
+    id: "corridor-river-south",
+    name: "Northbound River Flyway",
+    corridorName: "South Willamette Corridor",
+    timeWindow: "5:00 PM - 5:45 PM",
+    heading: "Heading North along River",
+    headingDeg: 350,
+    estFlockSize: 3400,
+    description: "Flocks from Oaks Bottom Wildlife Refuge and Sellwood follow the calm water thermals north under Ross Island and Marquam bridges toward central bridges.",
+    color: "#a855f7", // Purple
+    coordinates: [
+      [45.4850, -122.6550], // Oaks Bottom
+      [45.5010, -122.6630], // Ross Island Bridge
+      [45.5080, -122.6700], // Marquam Bridge
+      [45.5132, -122.6685], // Central Bridge zone
+      [45.5150, -122.6730], // Waterfront Park
+    ],
+  },
+  {
+    id: "corridor-river-north",
+    name: "Southbound River Flyway",
+    corridorName: "North Willamette Corridor",
+    timeWindow: "4:30 PM - 5:15 PM",
+    heading: "Heading South along River",
+    headingDeg: 165,
+    estFlockSize: 3100,
+    description: "Flocks from Sauvie Island, St. Johns, and Swan Island follow the river south past the Fremont and Steel bridges toward the central bridges.",
+    color: "#34d399", // Emerald
+    coordinates: [
+      [45.5580, -122.7100], // Swan Island Basin
+      [45.5390, -122.6850], // Fremont Bridge
+      [45.5280, -122.6740], // Steel Bridge
+      [45.5165, -122.6730], // Waterfront Park
+      [45.5140, -122.6825], // South Park Blocks
+    ],
+  },
+  {
+    id: "corridor-convergence",
+    name: "Final Roost Convergence",
+    corridorName: "Downtown Canopy Settlement",
+    timeWindow: "Dusk / Sunset (5:45 PM - 6:30 PM)",
+    heading: "Radial descent into Canopy",
+    headingDeg: 270,
+    estFlockSize: 15000,
+    description: "South Park Blocks & Waterfront canopy settling by dusk: massive convergence settling into the Dutch elms and tall deciduous street trees.",
+    color: "#ef4444", // Crimson
+    coordinates: [
+      [45.5165, -122.6730], // Waterfront Park
+      [45.5155, -122.6780], // SW Yamhill & 4th
+      [45.5140, -122.6825], // South Park Blocks Mega-Roost
+    ],
+  }
+];
+
 export const MOCK_OBSERVATIONS: Observation[] = [
   {
     id: "obs-1",
@@ -40,6 +132,13 @@ export const MOCK_OBSERVATIONS: Observation[] = [
     subId: "S14298102",
     direction: "Roosting (Elms & Maples)",
     isCrowRoost: true,
+    originStagingArea: "Convergence: Eastside & River Corridors",
+    flightHeadingDeg: 270,
+    trajectoryCoords: [
+      [45.5165, -122.6730],
+      [45.5155, -122.6780],
+      [45.5140, -122.6825]
+    ],
     notes: "Historic winter mega-roost canopy filled with vocalizations. Estimated 8,500 birds settling in tall downtown deciduous trees."
   },
   {
@@ -57,6 +156,13 @@ export const MOCK_OBSERVATIONS: Observation[] = [
     subId: "S14298103",
     direction: "SW toward Downtown Core",
     isCrowRoost: true,
+    originStagingArea: "Hawthorne Bridge & Eastside Pier",
+    flightHeadingDeg: 235,
+    trajectoryCoords: [
+      [45.5322, -122.6534], // Lloyd Center
+      [45.5132, -122.6685], // Hawthorne Bridge
+      [45.5150, -122.6730], // Waterfront Park
+    ],
     notes: "Huge evening river corridor flight stream crossing the Willamette River into downtown staging trees."
   },
   {
@@ -74,6 +180,12 @@ export const MOCK_OBSERVATIONS: Observation[] = [
     subId: "S14298104",
     direction: "SW toward Bridges",
     isCrowRoost: true,
+    originStagingArea: "East Multnomah / Gateway Staging",
+    flightHeadingDeg: 225,
+    trajectoryCoords: [
+      [45.5385, -122.6320],
+      [45.5320, -122.6540]
+    ],
     notes: "Eastside pre-roost staging aggregation before crossing the river into downtown roost sites."
   },
   {
@@ -91,6 +203,13 @@ export const MOCK_OBSERVATIONS: Observation[] = [
     subId: "S14298105",
     direction: "West across Willamette",
     isCrowRoost: true,
+    originStagingArea: "Southeast / Powell Corridor",
+    flightHeadingDeg: 270,
+    trajectoryCoords: [
+      [45.5085, -122.6450],
+      [45.5132, -122.6685],
+      [45.5150, -122.6730]
+    ],
     notes: "Continuous stream of crows flying low over river water into the city core."
   },
   {

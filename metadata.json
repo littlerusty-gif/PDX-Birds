@@ -1,6 +1,6 @@
 {
-  "name": "PDX Bird & Crow Tracker",
-  "description": "Portland field-guide & eBird 2.0 tracker for urban birding, winter crow mega-roosts, and migratory sightings across Multnomah County.",
+  "name": "Birdbook",
+  "description": "Birdbook - Portland urban birding, flight paths, and crow mega-roost tracker across Multnomah County.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
