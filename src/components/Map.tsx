@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, Tooltip, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, Tooltip, Circle, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { Observation, Hotspot, FlightCorridor, ViewMode } from '../types/bird';
+import { Observation, Hotspot, FlightCorridor, ViewMode, RegionConfig } from '../types/bird';
 import { SPECIES_FORECASTS, isSpeciesOptimalNow } from '../data/viewingForecast';
-import { ExternalLink, Navigation, CheckCircle2, Compass, Wind, Layers, Clock, Sparkles } from 'lucide-react';
+import { ExternalLink, Navigation, CheckCircle2, Compass, Wind, Layers, Clock, Sparkles, MapPin } from 'lucide-react';
 
 interface MapProps {
   observations: Observation[];
@@ -14,20 +14,27 @@ interface MapProps {
   corridors?: FlightCorridor[];
   selectedCorridor?: FlightCorridor | null;
   onSelectCorridor?: (corridor: FlightCorridor | null) => void;
+  region?: RegionConfig;
+  userLocation?: [number, number] | null;
+  onLocateMe?: () => void;
+  isLocating?: boolean;
 }
 
-// Controller component to smoothly fly to selected item or corridor
+// Controller component to smoothly fly to selected item, corridor, region, or GPS coordinate
 function MapController({
   item,
   selectedCorridor,
+  region,
+  userLocation,
 }: {
   item: Observation | Hotspot | null;
   selectedCorridor?: FlightCorridor | null;
+  region?: RegionConfig;
+  userLocation?: [number, number] | null;
 }) {
   const map = useMap();
 
   useEffect(() => {
-    // Invalidate size immediately after map creation to prevent blank/unrendered tiles
     const timer = setTimeout(() => {
       map.invalidateSize();
     }, 200);
@@ -43,18 +50,31 @@ function MapController({
     };
   }, [map]);
 
+  // Pan to selected item
   useEffect(() => {
     if (item) {
       map.flyTo([item.lat, item.lng], 14, { duration: 1.2 });
     }
   }, [item, map]);
 
+  // Fit bounds to selected corridor
   useEffect(() => {
     if (selectedCorridor && selectedCorridor.coordinates.length > 0) {
       const bounds = L.latLngBounds(selectedCorridor.coordinates);
       map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14, duration: 1.2 });
     }
   }, [selectedCorridor, map]);
+
+  // Fly to region center or GPS location when region changes
+  useEffect(() => {
+    if (region) {
+      if (region.category === 'gps' && userLocation) {
+        map.flyTo(userLocation, 12, { duration: 1.4 });
+      } else {
+        map.flyTo(region.center, region.zoom, { duration: 1.4 });
+      }
+    }
+  }, [region, userLocation, map]);
 
   return null;
 }
@@ -90,7 +110,6 @@ function getPositionAtProgress(
 
   if (totalLength === 0) return { lat: coords[0][0], lng: coords[0][1], bearing: 0 };
 
-  // Loop cleanly between 0 and 1
   const targetDist = (((progress % 1) + 1) % 1) * totalLength;
   let accumulated = 0;
 
@@ -124,17 +143,24 @@ export const Map: React.FC<MapProps> = ({
   corridors = [],
   selectedCorridor = null,
   onSelectCorridor,
+  region,
+  userLocation,
+  onLocateMe,
+  isLocating = false,
 }) => {
-  const portlandCenter: [number, number] = [45.5152, -122.6784];
+  const defaultCenter: [number, number] = region ? region.center : [45.5152, -122.6784];
+  const defaultZoom = region ? region.zoom : 12;
   const [showFlightPaths, setShowFlightPaths] = useState<boolean>(true);
   const [animationProgress, setAnimationProgress] = useState<number>(0);
+
+  const isPortlandOrPnw = region?.category === 'metro' || region?.id === 'portland';
 
   // Smooth continuous flight animation loop for traveling bird silhouettes
   useEffect(() => {
     if (!showFlightPaths) return;
     const interval = setInterval(() => {
       setAnimationProgress((prev) => (prev + 0.0035) % 1);
-    }, 40); // 25 FPS smooth continuous loop
+    }, 40);
     return () => clearInterval(interval);
   }, [showFlightPaths]);
 
@@ -213,6 +239,23 @@ export const Map: React.FC<MapProps> = ({
     });
   };
 
+  // User GPS Location Pin Marker
+  const createUserLocationIcon = () => {
+    return L.divIcon({
+      className: 'relative flex items-center justify-center',
+      html: `
+        <div class="relative flex items-center justify-center">
+          <span class="absolute inline-flex h-9 w-9 rounded-full bg-sky-400 opacity-75 animate-ping"></span>
+          <span class="relative inline-flex rounded-full h-6 w-6 bg-sky-500 border-2 border-white shadow-xl text-white font-extrabold text-[11px] items-center justify-center">
+            🛰️
+          </span>
+        </div>
+      `,
+      iconSize: [36, 36],
+      iconAnchor: [18, 18],
+    });
+  };
+
   // Directional arrowhead decorator spaced along corridor segments
   const createArrowDecoratorIcon = (bearingDeg: number, color: string) => {
     return L.divIcon({
@@ -238,7 +281,6 @@ export const Map: React.FC<MapProps> = ({
         <div style="transform: rotate(${bearingDeg}deg);" class="flex items-center justify-center">
           <div class="animated-flying-bird" style="color: ${color};">
             <svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="currentColor">
-              <!-- Outstretched curved flapping wings crow/swift silhouette -->
               <path d="M22 6c-4.5 1-8.5 4.5-10 9C10.5 10.5 6.5 7 2 6c3 5 4.5 11 4.5 11l4.5-3 1 3 1-3 4.5 3s1.5-6 4.5-11z" />
             </svg>
           </div>
@@ -256,7 +298,6 @@ export const Map: React.FC<MapProps> = ({
       .map((obs) => {
         let coords = obs.trajectoryCoords;
         if (!coords || coords.length < 2) {
-          // Derive back-traced vector
           let heading = obs.flightHeadingDeg ?? 225;
           if (!obs.flightHeadingDeg && obs.direction) {
             if (obs.direction.includes('SW')) heading = 225;
@@ -274,7 +315,6 @@ export const Map: React.FC<MapProps> = ({
           ];
         }
 
-        // Calculate segment intermediate points and bearing for directional arrows
         const start = coords[coords.length - 2];
         const end = coords[coords.length - 1];
         const bearing = calculateBearing(start[0], start[1], end[0], end[1]);
@@ -300,25 +340,45 @@ export const Map: React.FC<MapProps> = ({
       className="w-full h-full min-h-[500px] flex-1 relative z-0 touch-pan-x touch-pan-y"
       style={{ width: '100%', height: '100%', minHeight: '100%' }}
     >
-      {/* Flight Paths Toggle Control Button */}
-      <div className="absolute top-4 right-4 z-[400] flex items-center gap-2">
-        <button
-          onClick={() => setShowFlightPaths(!showFlightPaths)}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xl border backdrop-blur-md ${
-            showFlightPaths
-              ? 'bg-sky-500/90 hover:bg-sky-400 text-slate-950 border-sky-400/80 shadow-sky-500/20'
-              : 'bg-slate-900/90 hover:bg-slate-800 text-slate-300 border-slate-700'
-          }`}
-          title="Toggle Animated Inbound Flight Trajectories and Flying Bird Silhouettes"
-        >
-          <Wind size={13} className={showFlightPaths ? 'animate-pulse' : ''} />
-          <span>Flight Paths {showFlightPaths ? 'ON' : 'OFF'}</span>
-        </button>
+      {/* Floating Map Controls (Top Right) */}
+      <div className="absolute top-4 right-4 z-[400] flex flex-wrap items-center gap-2">
+        {/* "Use My Location" GPS Button */}
+        {onLocateMe && (
+          <button
+            onClick={onLocateMe}
+            disabled={isLocating}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xl border backdrop-blur-md ${
+              region?.category === 'gps'
+                ? 'bg-sky-500 text-slate-950 border-sky-300 shadow-sky-500/30'
+                : 'bg-slate-900/90 hover:bg-slate-800 text-sky-400 border-sky-500/40'
+            } active:scale-95 disabled:opacity-50`}
+            title="Center on my GPS coordinates (30-mile radius)"
+          >
+            <Navigation size={13} className={isLocating ? 'animate-spin' : ''} />
+            <span>{isLocating ? 'Locating...' : 'Use My Location'}</span>
+          </button>
+        )}
+
+        {/* Flight Paths Toggle Control Button (shown when viewing roost areas) */}
+        {isPortlandOrPnw && (
+          <button
+            onClick={() => setShowFlightPaths(!showFlightPaths)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xl border backdrop-blur-md ${
+              showFlightPaths
+                ? 'bg-emerald-500/90 hover:bg-emerald-400 text-slate-950 border-emerald-400/80 shadow-emerald-500/20'
+                : 'bg-slate-900/90 hover:bg-slate-800 text-slate-300 border-slate-700'
+            }`}
+            title="Toggle Animated Inbound Flight Trajectories and Flying Bird Silhouettes"
+          >
+            <Wind size={13} className={showFlightPaths ? 'animate-pulse' : ''} />
+            <span>Roost Paths {showFlightPaths ? 'ON' : 'OFF'}</span>
+          </button>
+        )}
       </div>
 
       <MapContainer
-        center={portlandCenter}
-        zoom={12}
+        center={defaultCenter}
+        zoom={defaultZoom}
         className="w-full h-full min-h-[500px]"
         style={{ width: '100%', height: '100%', minHeight: '100%' }}
         zoomControl={false}
@@ -327,21 +387,55 @@ export const Map: React.FC<MapProps> = ({
         doubleClickZoom={true}
         scrollWheelZoom={true}
       >
-        {/* Standard Free Public OpenStreetMap Tiles */}
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           maxZoom={19}
         />
 
-        <MapController item={selectedItem} selectedCorridor={selectedCorridor} />
+        <MapController
+          item={selectedItem}
+          selectedCorridor={selectedCorridor}
+          region={region}
+          userLocation={userLocation}
+        />
 
-        {/* Major Flight Corridors & Animated Flight Silhouettes (Parented to Flight Paths Layer) */}
-        {showFlightPaths &&
+        {/* User GPS Location Marker & 30-mile Radius */}
+        {userLocation && (
+          <>
+            <Marker position={userLocation} icon={createUserLocationIcon()}>
+              <Popup>
+                <div className="p-1 text-slate-200 text-xs">
+                  <div className="font-bold text-sky-400 flex items-center gap-1.5 mb-1">
+                    <Navigation size={13} />
+                    <span>Your GPS Location</span>
+                  </div>
+                  <p className="text-slate-300 text-[11px] leading-relaxed">
+                    Showing local bird observations within a 30-mile radius.
+                  </p>
+                </div>
+              </Popup>
+            </Marker>
+            <Circle
+              center={userLocation}
+              radius={48280} // 30 miles in meters
+              pathOptions={{
+                color: '#38bdf8',
+                fillColor: '#0284c7',
+                fillOpacity: 0.05,
+                weight: 1.5,
+                dashArray: '6, 6',
+              }}
+            />
+          </>
+        )}
+
+        {/* Major Flight Corridors (Enabled for Portland / PNW Metro Roosts) */}
+        {isPortlandOrPnw &&
+          showFlightPaths &&
           corridors.map((corridor) => {
             const isSelected = selectedCorridor?.id === corridor.id;
 
-            // Generate intermediate directional arrow decorators spaced along each leg
             const legArrowMarkers: { pos: [number, number]; bearing: number; key: string }[] = [];
             for (let i = 0; i < corridor.coordinates.length - 1; i++) {
               const p1 = corridor.coordinates[i];
@@ -349,7 +443,6 @@ export const Map: React.FC<MapProps> = ({
               const bearing = calculateBearing(p1[0], p1[1], p2[0], p2[1]);
               const legLen = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
 
-              // Place 2 arrows on longer legs, 1 on shorter legs
               const ratios = legLen > 0.015 ? [0.35, 0.72] : [0.5];
               ratios.forEach((ratio, rIdx) => {
                 legArrowMarkers.push({
@@ -360,8 +453,6 @@ export const Map: React.FC<MapProps> = ({
               });
             }
 
-            // Calculate animated flying bird silhouette positions along corridor path
-            // 3 staggered flock birds per corridor
             const birdOffsets = [0, 0.36, 0.72];
             const flyingBirds = birdOffsets.map((offset, bIdx) => {
               const t = (animationProgress + offset) % 1;
@@ -376,7 +467,6 @@ export const Map: React.FC<MapProps> = ({
 
             return (
               <React.Fragment key={corridor.id}>
-                {/* Glowing Background Glow Line */}
                 <Polyline
                   positions={corridor.coordinates}
                   pathOptions={{
@@ -387,7 +477,6 @@ export const Map: React.FC<MapProps> = ({
                   }}
                 />
 
-                {/* Animated Dashed Trajectory Polyline */}
                 <Polyline
                   positions={corridor.coordinates}
                   pathOptions={{
@@ -410,7 +499,6 @@ export const Map: React.FC<MapProps> = ({
                   </Tooltip>
                 </Polyline>
 
-                {/* Spaced Directional Arrowhead Decorators pointing toward Roost */}
                 {legArrowMarkers.map((arrow) => (
                   <Marker
                     key={arrow.key}
@@ -420,7 +508,6 @@ export const Map: React.FC<MapProps> = ({
                   />
                 ))}
 
-                {/* Animated Flying Bird Silhouette Glyphs traveling toward Convergence */}
                 {flyingBirds.map((bird) => (
                   <Marker
                     key={bird.key}
@@ -433,7 +520,7 @@ export const Map: React.FC<MapProps> = ({
             );
           })}
 
-        {/* Observation-Specific Back-Traced Inbound Trajectories & Flying Glyphs */}
+        {/* Observation-Specific Back-Traced Inbound Trajectories */}
         {showFlightPaths &&
           observationTrajectories.map((traj) => {
             const color = traj.isRoost ? '#ef4444' : '#38bdf8';
@@ -455,14 +542,12 @@ export const Map: React.FC<MapProps> = ({
                   }}
                 />
 
-                {/* Segment Arrowhead */}
                 <Marker
                   position={traj.mid}
                   icon={createArrowDecoratorIcon(traj.bearing, color)}
                   interactive={false}
                 />
 
-                {/* Animated Flying Bird on Observation Vector */}
                 <Marker
                   position={[birdPos.lat, birdPos.lng]}
                   icon={createFlyingBirdIcon(birdPos.bearing, color, true)}
@@ -539,7 +624,6 @@ export const Map: React.FC<MapProps> = ({
                     <span className="truncate">{obs.locName}</span>
                   </div>
 
-                  {/* Optimal Viewing Window Badge */}
                   {SPECIES_FORECASTS[obs.speciesCode.toLowerCase()] && (
                     <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
                       <span className="bg-amber-950/60 border border-amber-800/40 text-amber-300 text-[10px] font-semibold px-2 py-0.5 rounded flex items-center gap-1">

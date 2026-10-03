@@ -5,6 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { MOCK_OBSERVATIONS, MOCK_NOTABLE, MOCK_HOTSPOTS } from '../src/data/mockPortlandData.ts';
+import { NATIONWIDE_NOTABLE_OBSERVATIONS, generateStateMockObservations } from '../src/data/regions.ts';
 import { CrowRoostReport, Observation } from '../src/types/bird.ts';
 
 dotenv.config();
@@ -71,11 +72,37 @@ async function fetchEBird(endpoint: string, fallbackData: any) {
   }
 }
 
-// 0. Primary eBird API Proxy Endpoint (/api/birds)
-app.get('/api/birds', async (req: Request, res: Response) => {
+// Helper to determine best mock fallback for an eBird endpoint
+function getFallbackForEndpoint(endpoint: string, query?: any): any {
+  if (endpoint.includes('notable')) {
+    return NATIONWIDE_NOTABLE_OBSERVATIONS;
+  }
+  const stateMatch = endpoint.match(/obs\/(US-[A-Z]{2})\/recent/i);
+  if (stateMatch && stateMatch[1]) {
+    return generateStateMockObservations(stateMatch[1]);
+  }
+  if (endpoint.includes('geo')) {
+    const lat = query?.lat ? parseFloat(query.lat) : 45.5152;
+    const lng = query?.lng ? parseFloat(query.lng) : -122.6784;
+    return MOCK_OBSERVATIONS.map((obs, idx) => ({
+      ...obs,
+      lat: Number((lat + (Math.sin(idx * 2) * 0.12)).toFixed(4)),
+      lng: Number((lng + (Math.cos(idx * 2) * 0.12)).toFixed(4)),
+    }));
+  }
+  if (endpoint.includes('hotspot')) {
+    return MOCK_HOTSPOTS;
+  }
+  return MOCK_OBSERVATIONS;
+}
+
+// Primary eBird API Proxy Endpoint (/api/ebird and /api/birds)
+app.get(['/api/ebird', '/api/birds'], async (req: Request, res: Response) => {
   const endpoint = (req.query.endpoint as string) || '';
   if (endpoint) {
-    const data = await fetchEBird(endpoint, MOCK_OBSERVATIONS);
+    const cleanEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
+    const fallback = getFallbackForEndpoint(cleanEndpoint, req.query);
+    const data = await fetchEBird(cleanEndpoint, fallback);
     return res.json(data);
   }
 

@@ -65,3 +65,20 @@ export interface FlightCorridor {
 }
 
 export type ViewMode = 'species' | 'recent' | 'notable' | 'hotspots' | 'routes';
+
+export type RegionCategory = 'gps' | 'metro' | 'regional' | 'state' | 'nationwide';
+
+export interface RegionConfig {
+  id: string;
+  name: string;
+  category: RegionCategory;
+  regionCode?: string; // e.g. "US-OR", "US-WA", "US"
+  center: [number, number];
+  zoom: number;
+  description: string;
+  endpoint?: string;
+  lat?: number;
+  lng?: number;
+  distMiles?: number;
+}
+

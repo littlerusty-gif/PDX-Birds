@@ -30,6 +30,7 @@ interface SidebarProps {
   onSelectCorridor?: (corridor: FlightCorridor | null) => void;
   filterBestNow?: boolean;
   onToggleFilterBestNow?: () => void;
+  currentRegion?: RegionConfig;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -46,6 +47,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectCorridor,
   filterBestNow = false,
   onToggleFilterBestNow,
+  currentRegion,
 }) => {
   const [activeTab, setActiveTab] = useState<'sightings' | 'influx'>('sightings');
 
@@ -103,8 +105,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* ===================== TAB 1: SIGHTINGS FEED ===================== */}
         {activeTab === 'sightings' && (
           <>
-            {/* Top Intelligence Stats */}
+            {/* Top Intelligence Stats & Active Region */}
             <div className="p-3.5 border-b border-slate-800 bg-slate-900/60">
+              {currentRegion && (
+                <div className="mb-2.5 px-2.5 py-1.5 rounded-lg bg-slate-950/80 border border-slate-800 flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1.5 truncate">
+                    <MapPin size={13} className="text-emerald-400 shrink-0" />
+                    <span className="font-bold text-slate-200 truncate">{currentRegion.name}</span>
+                  </div>
+                  <span className="text-[10px] uppercase font-semibold tracking-wider text-slate-400 font-mono shrink-0">
+                    {currentRegion.category}
+                  </span>
+                </div>
+              )}
+
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
                   <Activity size={13} className="text-emerald-400" />
