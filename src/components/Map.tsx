@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { Observation, Hotspot } from '../types/bird';
-import { ExternalLink, Navigation, CheckCircle2, AlertCircle } from 'lucide-react';
+import { ExternalLink, Navigation, CheckCircle2 } from 'lucide-react';
 
 interface MapProps {
   observations: Observation[];
@@ -12,21 +12,46 @@ interface MapProps {
   onSelectItem: (item: Observation | Hotspot) => void;
 }
 
-// Controller component to smoothly fly to selected marker
-function MapRecenter({ item }: { item: Observation | Hotspot | null }) {
+// Map controller to invalidate sizing and handle smooth pan/zoom
+function MapController({ item }: { item: Observation | Hotspot | null }) {
   const map = useMap();
+
+  useEffect(() => {
+    // Invalidate size immediately after map creation to prevent blank/unrendered tiles
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+    }, 200);
+
+    const handleResize = () => {
+      map.invalidateSize();
+    };
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [map]);
+
   useEffect(() => {
     if (item) {
       map.flyTo([item.lat, item.lng], 14, { duration: 1.2 });
     }
   }, [item, map]);
+
   return null;
 }
 
-export const Map: React.FC<MapProps> = ({ observations, hotspots, selectedItem, mode, onSelectItem }) => {
+export const Map: React.FC<MapProps> = ({
+  observations,
+  hotspots,
+  selectedItem,
+  mode,
+  onSelectItem,
+}) => {
   const portlandCenter: [number, number] = [45.5152, -122.6784];
 
-  // Helper to create custom HTML markers with color coding and glowing pulse for roosts
+  // Custom graduated HTML markers with color coding and glowing pulse for roosts
   const createObservationIcon = (obs: Observation) => {
     const count = obs.howMany || 1;
     const isRoost = obs.isCrowRoost || count >= 250;
@@ -45,7 +70,7 @@ export const Map: React.FC<MapProps> = ({ observations, hotspots, selectedItem, 
       size = 22;
     }
 
-    // Transit direction arrow icon
+    // Directional vector transit arrow
     let arrowHtml = '';
     if (obs.direction) {
       let arrowChar = '➔';
@@ -58,7 +83,7 @@ export const Map: React.FC<MapProps> = ({ observations, hotspots, selectedItem, 
     }
 
     if (isRoost) {
-      // Crimson pulse marker
+      // Crimson pulse marker for roosts
       return L.divIcon({
         className: 'relative flex items-center justify-center',
         html: `
@@ -104,122 +129,131 @@ export const Map: React.FC<MapProps> = ({ observations, hotspots, selectedItem, 
   };
 
   return (
-    <div className="w-full h-full min-h-[100dvh] relative z-0 touch-pan-x touch-pan-y">
+    <div
+      className="w-full h-full min-h-[500px] flex-1 relative z-0 touch-pan-x touch-pan-y"
+      style={{ width: '100%', height: '100%', minHeight: '100%' }}
+    >
       <MapContainer
         center={portlandCenter}
         zoom={12}
-        className="w-full h-full min-h-[100dvh]"
+        className="w-full h-full min-h-[500px]"
+        style={{ width: '100%', height: '100%', minHeight: '100%' }}
         zoomControl={false}
         dragging={true}
         touchZoom={true}
         doubleClickZoom={true}
         scrollWheelZoom={true}
       >
-        {/* CARTO Voyager Tiles */}
+        {/* Standard Free Public OpenStreetMap Tiles */}
         <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?api_key=cb1_48rh_1_1aeeb6e599bfefb74038886d"
-          attribution='&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://ebird.org/">eBird</a>'
-          subdomains="abcd"
-          maxZoom={20}
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          maxZoom={19}
         />
 
-        <MapRecenter item={selectedItem} />
+        <MapController item={selectedItem} />
 
         {/* Hotspots Mode */}
-        {mode === 'hotspots' && hotspots?.map((spot) => (
-          <Marker
-            key={spot.locId}
-            position={[spot.lat, spot.lng]}
-            icon={createHotspotIcon()}
-            eventHandlers={{ click: () => onSelectItem(spot) }}
-          >
-            <Popup>
-              <div className="p-1 min-w-[210px] text-slate-200">
-                <div className="flex items-center gap-1.5 text-emerald-400 font-bold text-sm mb-1">
-                  <span>📍</span>
-                  <span>{spot.locName}</span>
-                </div>
-                <div className="text-xs text-slate-400 mb-2">Code: {spot.locId}</div>
-                <div className="bg-slate-800 rounded p-2 text-xs mb-2">
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">All-Time Species:</span>
-                    <span className="font-bold text-emerald-300">{spot.numSpeciesAllTime}</span>
+        {mode === 'hotspots' &&
+          hotspots?.map((spot) => (
+            <Marker
+              key={spot.locId}
+              position={[spot.lat, spot.lng]}
+              icon={createHotspotIcon()}
+              eventHandlers={{ click: () => onSelectItem(spot) }}
+            >
+              <Popup>
+                <div className="p-1 min-w-[210px] text-slate-200">
+                  <div className="flex items-center gap-1.5 text-emerald-400 font-bold text-sm mb-1">
+                    <span>📍</span>
+                    <span>{spot.locName}</span>
                   </div>
+                  <div className="text-xs text-slate-400 mb-2">Code: {spot.locId}</div>
+                  <div className="bg-slate-800 rounded p-2 text-xs mb-2">
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">All-Time Species:</span>
+                      <span className="font-bold text-emerald-300">{spot.numSpeciesAllTime}</span>
+                    </div>
+                  </div>
+                  <a
+                    href={`https://ebird.org/hotspot/${spot.locId}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1"
+                  >
+                    View eBird Hotspot <ExternalLink size={12} />
+                  </a>
                 </div>
-                <a
-                  href={`https://ebird.org/hotspot/${spot.locId}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center gap-1"
-                >
-                  View eBird Hotspot <ExternalLink size={12} />
-                </a>
-              </div>
-            </Popup>
-          </Marker>
-        ))}
+              </Popup>
+            </Marker>
+          ))}
 
         {/* Observations (Species, Recent, Notable) */}
-        {mode !== 'hotspots' && observations.map((obs) => (
-          <Marker
-            key={obs.id}
-            position={[obs.lat, obs.lng]}
-            icon={createObservationIcon(obs)}
-            eventHandlers={{ click: () => onSelectItem(obs) }}
-          >
-            <Popup>
-              <div className="p-1 min-w-[220px] text-slate-200">
-                <div className="flex items-start justify-between gap-2 mb-1">
-                  <div>
-                    <h3 className="font-bold text-slate-100 text-sm">{obs.comName}</h3>
-                    <p className="text-xs italic text-slate-400">{obs.sciName}</p>
-                  </div>
-                  <span className={`px-2 py-0.5 rounded text-[11px] font-bold ${
-                    obs.howMany >= 250 ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-emerald-500/20 text-emerald-300'
-                  }`}>
-                    {obs.howMany.toLocaleString()} birds
-                  </span>
-                </div>
-
-                <div className="text-xs text-slate-300 mb-1.5 flex items-center gap-1">
-                  <span className="text-emerald-400">📍</span>
-                  <span className="truncate">{obs.locName}</span>
-                </div>
-
-                {obs.direction && (
-                  <div className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-sky-300 flex items-center gap-1.5 mb-1.5">
-                    <Navigation size={12} />
-                    <span>Flight Vector: {obs.direction}</span>
-                  </div>
-                )}
-
-                {obs.notes && (
-                  <p className="text-[11px] text-slate-300 bg-slate-850 p-1.5 rounded mb-2 border border-slate-750">
-                    {obs.notes}
-                  </p>
-                )}
-
-                <div className="flex items-center justify-between border-t border-slate-800 pt-1.5 mt-1 text-[11px]">
-                  <span className="text-slate-400">{obs.obsDt}</span>
-                  {obs.subId && obs.subId !== 'COMMUNITY' ? (
-                    <a
-                      href={`https://ebird.org/checklist/${obs.subId}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-emerald-400 hover:underline flex items-center gap-1 font-semibold"
+        {mode !== 'hotspots' &&
+          observations.map((obs) => (
+            <Marker
+              key={obs.id}
+              position={[obs.lat, obs.lng]}
+              icon={createObservationIcon(obs)}
+              eventHandlers={{ click: () => onSelectItem(obs) }}
+            >
+              <Popup>
+                <div className="p-1 min-w-[220px] text-slate-200">
+                  <div className="flex items-start justify-between gap-2 mb-1">
+                    <div>
+                      <h3 className="font-bold text-slate-100 text-sm">{obs.comName}</h3>
+                      <p className="text-xs italic text-slate-400">{obs.sciName}</p>
+                    </div>
+                    <span
+                      className={`px-2 py-0.5 rounded text-[11px] font-bold ${
+                        obs.howMany >= 250
+                          ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                          : 'bg-emerald-500/20 text-emerald-300'
+                      }`}
                     >
-                      Checklist <ExternalLink size={10} />
-                    </a>
-                  ) : (
-                    <span className="text-emerald-400 font-medium flex items-center gap-1">
-                      <CheckCircle2 size={11} /> Community
+                      {obs.howMany.toLocaleString()} birds
                     </span>
+                  </div>
+
+                  <div className="text-xs text-slate-300 mb-1.5 flex items-center gap-1">
+                    <span className="text-emerald-400">📍</span>
+                    <span className="truncate">{obs.locName}</span>
+                  </div>
+
+                  {obs.direction && (
+                    <div className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs text-sky-300 flex items-center gap-1.5 mb-1.5">
+                      <Navigation size={12} />
+                      <span>Flight Vector: {obs.direction}</span>
+                    </div>
                   )}
+
+                  {obs.notes && (
+                    <p className="text-[11px] text-slate-300 bg-slate-850 p-1.5 rounded mb-2 border border-slate-750">
+                      {obs.notes}
+                    </p>
+                  )}
+
+                  <div className="flex items-center justify-between border-t border-slate-800 pt-1.5 mt-1 text-[11px]">
+                    <span className="text-slate-400">{obs.obsDt}</span>
+                    {obs.subId && obs.subId !== 'COMMUNITY' ? (
+                      <a
+                        href={`https://ebird.org/checklist/${obs.subId}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-emerald-400 hover:underline flex items-center gap-1 font-semibold"
+                      >
+                        Checklist <ExternalLink size={10} />
+                      </a>
+                    ) : (
+                      <span className="text-emerald-400 font-medium flex items-center gap-1">
+                        <CheckCircle2 size={11} /> Community
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </Popup>
-          </Marker>
-        ))}
+              </Popup>
+            </Marker>
+          ))}
       </MapContainer>
     </div>
   );

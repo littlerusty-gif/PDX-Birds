@@ -123,7 +123,7 @@ export const App: React.FC = () => {
       />
 
       {/* Main Viewport Container */}
-      <div className="relative flex-1 w-full h-[100dvh] md:h-full overflow-hidden">
+      <div className="relative flex-1 w-full h-[100dvh] md:h-full min-h-[500px] overflow-hidden flex">
         {/* Collapsible Observation List Sidebar */}
         <Sidebar
           isOpen={isSidebarOpen}
