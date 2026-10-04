@@ -5,7 +5,11 @@ import fs from 'fs';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { MOCK_OBSERVATIONS, MOCK_NOTABLE, MOCK_HOTSPOTS } from '../src/data/mockPortlandData.ts';
-import { NATIONWIDE_NOTABLE_OBSERVATIONS, generateStateMockObservations } from '../src/data/regions.ts';
+import {
+  NATIONWIDE_NOTABLE_OBSERVATIONS,
+  WASHINGTON_HOTSPOT_OBSERVATIONS,
+  generateStateMockObservations,
+} from '../src/data/regions.ts';
 import { CrowRoostReport, Observation } from '../src/types/bird.ts';
 
 dotenv.config();
@@ -74,6 +78,9 @@ async function fetchEBird(endpoint: string, fallbackData: any) {
 
 // Helper to determine best mock fallback for an eBird endpoint
 function getFallbackForEndpoint(endpoint: string, query?: any): any {
+  if (endpoint.includes('US-WA')) {
+    return WASHINGTON_HOTSPOT_OBSERVATIONS;
+  }
   if (endpoint.includes('notable')) {
     return NATIONWIDE_NOTABLE_OBSERVATIONS;
   }

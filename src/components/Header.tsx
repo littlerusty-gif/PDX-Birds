@@ -36,6 +36,7 @@ interface HeaderProps {
   observations?: Observation[];
   searchFilter: string;
   onSearchFilterChange: (val: string) => void;
+  onOpenChat: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -56,35 +57,94 @@ export const Header: React.FC<HeaderProps> = ({
   observations = [],
   searchFilter,
   onSearchFilterChange,
+  onOpenChat,
 }) => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [isRegionMenuOpen, setIsRegionMenuOpen] = useState(false);
-  const [stateSearchText, setStateSearchText] = useState('');
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const regionMenuRef = useRef<HTMLDivElement>(null);
 
-  // Close dropdowns on outside click
+  // Close species autocomplete on outside click
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsDropdownOpen(false);
-      }
-      if (regionMenuRef.current && !regionMenuRef.current.contains(event.target as Node)) {
-        setIsRegionMenuOpen(false);
       }
     }
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Filtered US States for dropdown
-  const filteredStates = useMemo(() => {
-    const q = stateSearchText.toLowerCase().trim();
-    if (!q) return US_STATES;
-    return US_STATES.filter(
-      (s) => s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q)
-    );
-  }, [stateSearchText]);
+  // Compute active region dropdown value
+  const currentRegionValue = useMemo(() => {
+    if (currentRegion.category === 'gps') return 'gps';
+    if (currentRegion.id === 'portland' || currentRegion.regionCode === 'US-OR-051') return 'portland';
+    if (currentRegion.regionCode === 'US-WA' || currentRegion.id === 'state-us-wa') return 'US-WA';
+    if (currentRegion.regionCode === 'US-OR' || currentRegion.id === 'state-us-or') return 'US-OR';
+    if (currentRegion.regionCode === 'US' || currentRegion.id === 'nationwide') return 'US';
+    return currentRegion.regionCode || currentRegion.id;
+  }, [currentRegion]);
+
+  // Synchronized dropdown selection handler
+  const handleDropdownSelect = (val: string) => {
+    if (val === 'gps') {
+      onLocateMe();
+    } else if (val === 'portland') {
+      onSelectRegion(PRIMARY_REGIONS[0]);
+    } else if (val === 'US-WA') {
+      const wa: RegionConfig = {
+        id: 'state-us-wa',
+        name: 'Washington State (US-WA)',
+        category: 'state',
+        regionCode: 'US-WA',
+        center: [47.5000, -120.5000],
+        zoom: 7,
+        bounds: [[45.54, -124.85], [49.00, -116.92]],
+        description: 'Puget Sound, Cascades, Olympic Peninsula, Skagit Flats & Columbia Basin flyways.',
+        endpoint: 'data/obs/US-WA/recent/notable?detail=full&back=7',
+      };
+      onSelectRegion(wa);
+    } else if (val === 'US-OR') {
+      const or = PRIMARY_REGIONS.find((r) => r.regionCode === 'US-OR') || {
+        id: 'state-us-or',
+        name: 'Oregon State (US-OR)',
+        category: 'state',
+        regionCode: 'US-OR',
+        center: [43.8041, -120.5542],
+        zoom: 7,
+        bounds: [[41.99, -124.57], [46.24, -116.46]],
+        description: 'Oregon coast, Willamette Valley, Cascades, and High Desert.',
+        endpoint: 'data/obs/US-OR/recent/notable?detail=full&back=7',
+      };
+      onSelectRegion(or);
+    } else if (val === 'US' || val === 'nationwide') {
+      const nation = PRIMARY_REGIONS.find((r) => r.regionCode === 'US') || {
+        id: 'nationwide',
+        name: 'Nationwide Rare & Notable (US)',
+        category: 'nationwide',
+        regionCode: 'US',
+        center: [39.8283, -98.5795],
+        zoom: 4,
+        bounds: [[24.39, -125.0], [49.38, -66.93]],
+        description: 'Live alerts across the United States.',
+        endpoint: 'data/obs/US/recent/notable?detail=full&back=7',
+      };
+      onSelectRegion(nation);
+    } else {
+      const st = US_STATES.find((s) => s.code === val);
+      if (st) {
+        onSelectRegion({
+          id: `state-${st.code.toLowerCase()}`,
+          name: `${st.code} - ${st.name}`,
+          category: 'state',
+          regionCode: st.code,
+          center: st.center,
+          zoom: st.zoom,
+          bounds: st.bounds,
+          description: `Live observations from ${st.name} (${st.code}).`,
+          endpoint: `data/obs/${st.code}/recent/notable?detail=full&back=7`,
+        });
+      }
+    }
+  };
 
   // Combined nationwide taxonomy + observed species for autocomplete
   const combinedTaxonomy = useMemo(() => {
@@ -120,14 +180,14 @@ export const Header: React.FC<HeaderProps> = ({
   const getRegionIcon = (region: RegionConfig) => {
     if (region.category === 'gps') return <Navigation size={14} className="text-sky-400" />;
     if (region.category === 'metro') return <MapPin size={14} className="text-emerald-400" />;
-    if (region.category === 'regional') return <Compass size={14} className="text-teal-400" />;
+    if (region.regionCode === 'US-WA') return <MapPin size={14} className="text-teal-400" />;
     if (region.category === 'state') return <MapPin size={14} className="text-amber-400" />;
     return <Globe size={14} className="text-purple-400" />;
   };
 
   return (
-    <header className="bg-slate-950/95 backdrop-blur-md border-b border-slate-800/80 text-slate-100 px-3 md:px-4 py-2 md:py-2.5 z-30 fixed md:relative top-0 inset-x-0 shadow-xl">
-      <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-2.5">
+    <header className="bg-slate-950/95 backdrop-blur-md border-b border-slate-800/80 text-slate-100 px-3 md:px-5 py-2 md:py-2.5 z-30 fixed md:relative top-0 inset-x-0 shadow-xl w-full">
+      <div className="w-full flex flex-col md:flex-row md:items-center justify-between gap-2.5">
         
         {/* Title & Brand: The Bird Book */}
         <div className="flex items-center justify-between">
@@ -181,6 +241,14 @@ export const Header: React.FC<HeaderProps> = ({
               <Plus size={16} />
             </button>
             <button
+              onClick={onOpenChat}
+              className="p-1.5 rounded-lg bg-teal-600 text-white relative active:scale-95 shadow-sm"
+              title="Field Chat & Meetups"
+            >
+              <Users size={16} />
+              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            </button>
+            <button
               onClick={onOpenAiWidget}
               className="p-1.5 rounded-lg bg-purple-600 text-white"
               title="AI Roost Summary"
@@ -190,116 +258,36 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Center: Region Selector & Nationwide Search Bar */}
+        {/* Center: Synchronized Region Selector Dropdown & Search Bar */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-1 md:max-w-2xl md:mx-3">
           
-          {/* 1. Nationwide & State Region Switching Dropdown */}
-          <div className="relative" ref={regionMenuRef}>
-            <button
-              onClick={() => setIsRegionMenuOpen(!isRegionMenuOpen)}
-              className="w-full sm:w-auto flex items-center justify-between gap-1.5 px-3 py-1.5 bg-slate-900 hover:bg-slate-850 border border-slate-750 hover:border-slate-600 rounded-lg text-xs font-semibold text-slate-200 transition-colors shadow-sm"
-              title="Switch Region, State, or GPS"
+          {/* 1. Synchronized Region Selector Dropdown */}
+          <div className="relative flex items-center">
+            <div className="absolute left-2.5 pointer-events-none text-slate-400 z-10">
+              {getRegionIcon(currentRegion)}
+            </div>
+            <select
+              id="region-selector"
+              data-testid="region-selector"
+              aria-label="Region Selector"
+              value={currentRegionValue}
+              onChange={(e) => handleDropdownSelect(e.target.value)}
+              className="w-full sm:w-auto pl-8 pr-7 py-1.5 bg-slate-900 hover:bg-slate-850 border border-slate-750 hover:border-slate-600 focus:border-emerald-500 rounded-lg text-xs font-semibold text-slate-200 transition-colors shadow-sm appearance-none cursor-pointer focus:outline-none"
             >
-              <span className="flex items-center gap-1.5 truncate max-w-[210px]">
-                {getRegionIcon(currentRegion)}
-                <span className="truncate">{currentRegion.name}</span>
-              </span>
-              <ChevronDown size={14} className="text-slate-400 shrink-0" />
-            </button>
-
-            {/* Region Dropdown Menu */}
-            {isRegionMenuOpen && (
-              <div className="absolute top-full left-0 mt-1.5 w-84 max-w-[94vw] bg-slate-900 border border-slate-750 rounded-xl shadow-2xl overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-100">
-                <div className="p-2 border-b border-slate-800 bg-slate-950/70">
-                  <div className="text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-1.5">
-                    Coverage Scope
-                  </div>
-                  <div className="space-y-1">
-                    {PRIMARY_REGIONS.map((reg) => (
-                      <button
-                        key={reg.id}
-                        onClick={() => {
-                          if (reg.category === 'gps') {
-                            onLocateMe();
-                          } else {
-                            onSelectRegion(reg);
-                          }
-                          setIsRegionMenuOpen(false);
-                        }}
-                        className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between transition-colors ${
-                          currentRegion.id === reg.id
-                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold'
-                            : 'hover:bg-slate-800 text-slate-200'
-                        }`}
-                      >
-                        <span className="flex items-center gap-2">
-                          {getRegionIcon(reg)}
-                          <span>{reg.name}</span>
-                        </span>
-                        {reg.category === 'gps' && isLocating && (
-                          <span className="text-[10px] text-sky-400 animate-pulse">Locating...</span>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* All 50 US States Search Section */}
-                <div className="p-2.5">
-                  <div className="text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-1.5 flex items-center justify-between">
-                    <span>All 50 US States</span>
-                    <span className="text-[10px] text-slate-400">US-XX format</span>
-                  </div>
-                  <div className="relative mb-2">
-                    <Search className="absolute left-2.5 top-2 text-slate-400" size={13} />
-                    <input
-                      type="text"
-                      value={stateSearchText}
-                      onChange={(e) => setStateSearchText(e.target.value)}
-                      placeholder="Search state (e.g. US-OR, US-WA, CA, NY)..."
-                      className="w-full bg-slate-950 border border-slate-750 rounded-lg pl-8 pr-3 py-1 text-xs text-slate-100 placeholder-slate-400 focus:outline-none focus:border-emerald-500"
-                    />
-                  </div>
-
-                  <div className="max-h-48 overflow-y-auto space-y-0.5 pr-1 custom-scrollbar">
-                    {filteredStates.map((st) => (
-                      <button
-                        key={st.code}
-                        onClick={() => {
-                          const stateRegion: RegionConfig = {
-                            id: `state-${st.code.toLowerCase()}`,
-                            name: `${st.code} - ${st.name}`,
-                            category: 'state',
-                            regionCode: st.code,
-                            center: st.center,
-                            zoom: st.zoom,
-                            bounds: st.bounds,
-                            description: `Live observations from ${st.name} (${st.code}).`,
-                            endpoint: `data/obs/${st.code}/recent/notable?detail=full&back=7`,
-                          };
-                          onSelectRegion(stateRegion);
-                          setIsRegionMenuOpen(false);
-                          setStateSearchText('');
-                        }}
-                        className={`w-full text-left px-2 py-1.5 rounded text-xs flex items-center justify-between transition-colors ${
-                          currentRegion.regionCode === st.code
-                            ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30'
-                            : 'hover:bg-slate-800 text-slate-300'
-                        }`}
-                      >
-                        <span className="font-semibold">{st.code} - {st.name}</span>
-                        <span className="text-[10px] font-mono bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded">
-                          {st.code}
-                        </span>
-                      </button>
-                    ))}
-                    {filteredStates.length === 0 && (
-                      <div className="text-center py-3 text-xs text-slate-400">No matching states found</div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
+              <option value="portland">Portland Metro (Roost Focus)</option>
+              <option value="US-WA">Washington State (US-WA)</option>
+              <option value="US-OR">Oregon State (US-OR)</option>
+              <option value="gps">Current Location (GPS Nearby)</option>
+              <option value="US">Nationwide Rare & Notable (US)</option>
+              <optgroup label="All 50 US States">
+                {US_STATES.map((st) => (
+                  <option key={st.code} value={st.code}>
+                    {st.code} - {st.name}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+            <ChevronDown size={14} className="absolute right-2.5 pointer-events-none text-slate-400 z-10" />
           </div>
 
           {/* 2. Fast Nationwide Autocomplete Search Bar */}
@@ -383,6 +371,16 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           <button
+            onClick={onOpenChat}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-teal-800/80 hover:bg-teal-700 border border-teal-500/50 text-teal-200 hover:text-white font-bold text-xs rounded-lg transition-colors shadow-sm"
+            title="Regional Community Meetup & Field Chat"
+          >
+            <Users size={15} className="text-teal-300" />
+            <span>Field Chat</span>
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+          </button>
+
+          <button
             onClick={onOpenAiWidget}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-750 border border-purple-500/40 text-purple-300 font-semibold text-xs rounded-lg transition-colors"
           >
@@ -393,7 +391,7 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Mode Navigation Filter Chips */}
-      <div className="max-w-7xl mx-auto flex items-center gap-1.5 mt-2 overflow-x-auto pb-0.5 text-xs no-scrollbar">
+      <div className="w-full flex items-center gap-1.5 mt-2 overflow-x-auto pb-0.5 text-xs no-scrollbar">
         <button
           onClick={() => onSetMode('recent')}
           className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md font-semibold whitespace-nowrap transition-colors text-[11px] md:text-xs ${

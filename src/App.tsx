@@ -1,21 +1,38 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Observation, Hotspot, ViewMode, TaxonomyItem, CrowRoostReport, FlightCorridor, RegionConfig } from './types/bird';
+import { MeetupProposal } from './types/chat';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { Map } from './components/Map';
 import { ReportModal } from './components/ReportModal';
 import { AiRoostWidget } from './components/AiRoostWidget';
 import { MobileBottomSheet } from './components/MobileBottomSheet';
+import { LocationModal } from './components/LocationModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { FieldChatDrawer } from './components/FieldChatDrawer';
+import { DisclaimerModal } from './components/DisclaimerModal';
+import { HandleModal } from './components/HandleModal';
 import { MOCK_OBSERVATIONS, MOCK_NOTABLE, MOCK_HOTSPOTS, FLIGHT_CORRIDORS } from './data/mockPortlandData';
 import { PRIMARY_REGIONS } from './data/regions';
 import { isSpeciesOptimalNow } from './data/viewingForecast';
 import { fetchObservationsForRegion, fetchHotspotsForRegion } from './services/ebirdService';
+
+const STORAGE_KEY_HANDLE = 'thebirdbook_handle';
+const STORAGE_KEY_HOME_REGION = 'thebirdbook_home_region';
+const STORAGE_KEY_DISCLAIMER = 'thebirdbook_disclaimer_signed';
 
 export const App: React.FC = () => {
   const [currentRegion, setCurrentRegion] = useState<RegionConfig>(PRIMARY_REGIONS[0]);
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
   const [isLocating, setIsLocating] = useState<boolean>(false);
   const [searchFilter, setSearchFilter] = useState<string>('');
+  const [isLocationModalOpen, setIsLocationModalOpen] = useState<boolean>(() => {
+    try {
+      return !sessionStorage.getItem('birdbook_welcome_dismissed');
+    } catch {
+      return true;
+    }
+  });
 
   const [mode, setMode] = useState<ViewMode>('recent');
   const [selectedSpecies, setSelectedSpecies] = useState<TaxonomyItem | null>(null);
@@ -30,6 +47,26 @@ export const App: React.FC = () => {
   const [aiCustomQuestion, setAiCustomQuestion] = useState<string | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(false);
 
+  // Field Chat & Community Meetup state
+  const [isChatOpen, setIsChatOpen] = useState<boolean>(false);
+  const [isDisclaimerOpen, setIsDisclaimerOpen] = useState<boolean>(false);
+  const [isHandleModalOpen, setIsHandleModalOpen] = useState<boolean>(false);
+  const [userHandle, setUserHandle] = useState<string>(() => {
+    try {
+      return localStorage.getItem(STORAGE_KEY_HANDLE) || '';
+    } catch {
+      return '';
+    }
+  });
+  const [userHomeRegion, setUserHomeRegion] = useState<string>(() => {
+    try {
+      return localStorage.getItem(STORAGE_KEY_HOME_REGION) || 'OR-Metro';
+    } catch {
+      return 'OR-Metro';
+    }
+  });
+  const [pinnedMeetup, setPinnedMeetup] = useState<MeetupProposal | null>(null);
+
   // Dynamic data fetching across chosen region (GPS, Metro, State, or Nationwide)
   useEffect(() => {
     let isCancelled = false;
@@ -39,7 +76,7 @@ export const App: React.FC = () => {
       try {
         if (mode === 'hotspots') {
           const spots = await fetchHotspotsForRegion(currentRegion);
-          if (!isCancelled) {
+          if (!isCancelled && Array.isArray(spots)) {
             setHotspots(spots);
           }
         } else {
@@ -48,12 +85,12 @@ export const App: React.FC = () => {
             mode,
             mode === 'species' ? selectedSpecies?.speciesCode : undefined
           );
-          if (!isCancelled) {
+          if (!isCancelled && Array.isArray(obs)) {
             setObservations(obs);
           }
         }
       } catch (err) {
-        console.warn('Error loading regional telemetry, using fallback:', err);
+        console.warn('Safe catch in loadData, retaining fallback:', err);
       } finally {
         if (!isCancelled) {
           setIsLoading(false);
@@ -84,11 +121,11 @@ export const App: React.FC = () => {
 
         const gpsRegion: RegionConfig = {
           id: 'gps',
-          name: 'Current Location (GPS)',
+          name: 'Current Location (GPS Nearby)',
           category: 'gps',
           center: [lat, lng],
           zoom: 12,
-          description: 'Observations within 30 miles of your current GPS location.',
+          description: 'Observations within 30 miles / 50 km of your current GPS location.',
           lat,
           lng,
           distMiles: 30,
@@ -110,16 +147,105 @@ export const App: React.FC = () => {
     );
   };
 
+  // Reset to Default View handler for Error Boundary
+  const handleResetToDefault = () => {
+    setCurrentRegion(PRIMARY_REGIONS[0]);
+    setUserLocation(null);
+    setSelectedSpecies(null);
+    setSelectedItem(null);
+    setSelectedCorridor(null);
+    setSearchFilter('');
+    setFilterBestNow(false);
+    setMode('recent');
+    setObservations(MOCK_OBSERVATIONS);
+    setHotspots(MOCK_HOTSPOTS);
+    setPinnedMeetup(null);
+  };
+
+  // Close welcome location modal and mark session
+  const handleDismissLocationModal = () => {
+    setIsLocationModalOpen(false);
+    try {
+      sessionStorage.setItem('birdbook_welcome_dismissed', 'true');
+    } catch {
+      // safe ignore
+    }
+  };
+
+  // Field Chat: Check/Request Disclaimer agreement
+  const handleRequestDisclaimer = (): boolean => {
+    try {
+      const agreed = localStorage.getItem(STORAGE_KEY_DISCLAIMER) === 'true';
+      if (!agreed) {
+        setIsDisclaimerOpen(true);
+        return false;
+      }
+      return true;
+    } catch {
+      return true;
+    }
+  };
+
+  // Field Chat: Check/Request Handle creation
+  const handleRequestHandle = (): string | null => {
+    if (userHandle && userHandle.trim().length >= 3) {
+      return userHandle;
+    }
+    setIsHandleModalOpen(true);
+    return null;
+  };
+
+  // Agree to legal disclaimer
+  const handleAgreeDisclaimer = () => {
+    try {
+      localStorage.setItem(STORAGE_KEY_DISCLAIMER, 'true');
+    } catch {}
+    setIsDisclaimerOpen(false);
+    setIsChatOpen(true);
+
+    // If handle not yet created, prompt for it
+    if (!userHandle) {
+      setIsHandleModalOpen(true);
+    }
+  };
+
+  // Save permanent handle & home region
+  const handleSaveHandle = (handle: string, homeRegion: string) => {
+    setUserHandle(handle);
+    setUserHomeRegion(homeRegion);
+    try {
+      localStorage.setItem(STORAGE_KEY_HANDLE, handle);
+      localStorage.setItem(STORAGE_KEY_HOME_REGION, homeRegion);
+    } catch {}
+    setIsHandleModalOpen(false);
+  };
+
+  // Open Field Chat Drawer
+  const handleOpenChat = () => {
+    const isAgreed = handleRequestDisclaimer();
+    if (isAgreed) {
+      setIsChatOpen(true);
+    }
+  };
+
+  // Pin proposed meetup to map
+  const handlePinMeetupToMap = (meetup: MeetupProposal) => {
+    setPinnedMeetup(meetup);
+    // Center map on meetup
+    if (meetup.lat && meetup.lng) {
+      setSelectedItem(null);
+    }
+  };
+
   // Nationwide search and "Best to View Right Now" active filtering
   const displayedObservations = useMemo(() => {
+    if (!Array.isArray(observations)) return [];
     let result = observations;
 
-    // 1. Peak window filter
     if (filterBestNow) {
       result = result.filter((obs) => isSpeciesOptimalNow(obs.speciesCode));
     }
 
-    // 2. Nationwide Search Filter across Common Name, Scientific Name, Code, or Location
     const q = searchFilter.trim().toLowerCase();
     if (q) {
       result = result.filter(
@@ -195,8 +321,8 @@ export const App: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
-      {/* Nationwide Header with Region Selector & Autocomplete Search */}
+    <div className="flex flex-col w-full h-screen min-h-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
+      {/* Nationwide Header with Region Selector, Search & Field Chat */}
       <Header
         mode={mode}
         onSetMode={(newMode) => {
@@ -225,62 +351,111 @@ export const App: React.FC = () => {
           setCurrentRegion(reg);
           setSelectedItem(null);
           setSelectedCorridor(null);
+          setObservations([]);
         }}
         onLocateMe={handleLocateMe}
         isLocating={isLocating}
         observations={observations}
         searchFilter={searchFilter}
         onSearchFilterChange={setSearchFilter}
+        onOpenChat={handleOpenChat}
       />
 
-      {/* Main View Area: Sidebar Pane + Dynamic Map */}
-      <div className="flex-1 relative flex overflow-hidden">
-        {/* Collapsible Left Intelligence Sidebar */}
-        <Sidebar
-          isOpen={isSidebarOpen}
-          onToggle={() => setIsSidebarOpen((prev) => !prev)}
-          mode={mode}
-          observations={displayedObservations}
-          hotspots={hotspots}
-          selectedItem={selectedItem}
-          onSelectItem={(item) => {
-            setSelectedItem(item);
-            setSelectedCorridor(null);
-          }}
-          isLoading={isLoading}
-          corridors={FLIGHT_CORRIDORS}
-          selectedCorridor={selectedCorridor}
-          onSelectCorridor={(corridor) => {
-            setSelectedCorridor(corridor);
-            setSelectedItem(null);
-          }}
-          filterBestNow={filterBestNow}
-          onToggleFilterBestNow={() => setFilterBestNow((prev) => !prev)}
-          currentRegion={currentRegion}
-        />
+      {/* Main View Area with React Error Boundary */}
+      <ErrorBoundary onReset={handleResetToDefault}>
+        <div className="flex-1 w-full h-full relative flex overflow-hidden">
+          {/* Collapsible Left Intelligence Sidebar */}
+          <Sidebar
+            isOpen={isSidebarOpen}
+            onToggle={() => setIsSidebarOpen((prev) => !prev)}
+            mode={mode}
+            observations={displayedObservations}
+            hotspots={hotspots}
+            selectedItem={selectedItem}
+            onSelectItem={(item) => {
+              setSelectedItem(item);
+              setSelectedCorridor(null);
+            }}
+            isLoading={isLoading}
+            corridors={FLIGHT_CORRIDORS}
+            selectedCorridor={selectedCorridor}
+            onSelectCorridor={(corridor) => {
+              setSelectedCorridor(corridor);
+              setSelectedItem(null);
+            }}
+            filterBestNow={filterBestNow}
+            onToggleFilterBestNow={() => setFilterBestNow((prev) => !prev)}
+            currentRegion={currentRegion}
+          />
 
-        {/* 100% Viewport Height Leaflet Map with Dynamic Center & Geolocation */}
-        <Map
-          observations={displayedObservations}
-          hotspots={hotspots}
-          selectedItem={selectedItem}
-          mode={mode}
-          onSelectItem={(item) => {
-            setSelectedItem(item);
-            setSelectedCorridor(null);
-          }}
-          corridors={FLIGHT_CORRIDORS}
-          selectedCorridor={selectedCorridor}
-          onSelectCorridor={(corridor) => {
-            setSelectedCorridor(corridor);
-            setSelectedItem(null);
-          }}
-          region={currentRegion}
-          userLocation={userLocation}
-          onLocateMe={handleLocateMe}
-          isLocating={isLocating}
-        />
-      </div>
+          {/* 100% Viewport Height Leaflet Map Container */}
+          <div className="flex-1 w-full h-full min-w-0 relative">
+            <Map
+              observations={displayedObservations}
+              hotspots={hotspots}
+              selectedItem={selectedItem}
+              mode={mode}
+              onSelectItem={(item) => {
+                setSelectedItem(item);
+                setSelectedCorridor(null);
+              }}
+              corridors={FLIGHT_CORRIDORS}
+              selectedCorridor={selectedCorridor}
+              onSelectCorridor={(corridor) => {
+                setSelectedCorridor(corridor);
+                setSelectedItem(null);
+              }}
+              region={currentRegion}
+              userLocation={userLocation}
+              onLocateMe={handleLocateMe}
+              isLocating={isLocating}
+              pinnedMeetup={pinnedMeetup}
+            />
+          </div>
+        </div>
+      </ErrorBoundary>
+
+      {/* Regional Community Meetup & Field Chat Drawer */}
+      <FieldChatDrawer
+        isOpen={isChatOpen}
+        onClose={() => setIsChatOpen(false)}
+        currentRegion={currentRegion}
+        nearbyHotspots={hotspots}
+        onPinMeetupToMap={handlePinMeetupToMap}
+        onRequestDisclaimer={handleRequestDisclaimer}
+        onRequestHandle={handleRequestHandle}
+        homeRegion={userHomeRegion}
+      />
+
+      {/* Explicit Legal Liability & Outdoor Excursion Disclaimer Modal */}
+      <DisclaimerModal
+        isOpen={isDisclaimerOpen}
+        onAgree={handleAgreeDisclaimer}
+        onClose={() => setIsDisclaimerOpen(false)}
+      />
+
+      {/* Permanent Field Handle Selection Modal */}
+      <HandleModal
+        isOpen={isHandleModalOpen}
+        currentHandle={userHandle}
+        currentHomeRegion={userHomeRegion}
+        onSave={handleSaveHandle}
+        onClose={() => setIsHandleModalOpen(false)}
+      />
+
+      {/* Initial Welcome Location Selection Modal */}
+      <LocationModal
+        isOpen={isLocationModalOpen}
+        onClose={handleDismissLocationModal}
+        onSelectRegion={(reg) => {
+          setCurrentRegion(reg);
+          setSelectedItem(null);
+          setSelectedCorridor(null);
+          setObservations([]);
+        }}
+        onLocateMe={handleLocateMe}
+        isLocating={isLocating}
+      />
 
       {/* Mobile Sighting Details Bottom Sheet (<768px) */}
       <MobileBottomSheet
